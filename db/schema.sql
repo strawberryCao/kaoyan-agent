@@ -62,6 +62,53 @@ CREATE TABLE IF NOT EXISTS memories (
     FOREIGN KEY (review_id) REFERENCES nightly_reviews(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS study_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    subject TEXT NOT NULL DEFAULT '',
+    estimated_minutes INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'todo'
+        CHECK (status IN ('todo', 'doing', 'done', 'skipped')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mistake_cards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject TEXT NOT NULL DEFAULT '',
+    chapter TEXT NOT NULL DEFAULT '',
+    question TEXT NOT NULL DEFAULT '',
+    analysis TEXT NOT NULL DEFAULT '',
+    mistake_reason TEXT NOT NULL DEFAULT 'unknown',
+    knowledge_points TEXT NOT NULL DEFAULT '',
+    review_priority INTEGER NOT NULL DEFAULT 1,
+    mastery_status TEXT NOT NULL DEFAULT 'unmastered'
+        CHECK (mastery_status IN ('unmastered', 'reviewing', 'mastered')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS checkpoint_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject TEXT NOT NULL DEFAULT '',
+    chapter TEXT NOT NULL DEFAULT '',
+    user_answer TEXT NOT NULL DEFAULT '',
+    score INTEGER NOT NULL DEFAULT 0,
+    passed INTEGER NOT NULL DEFAULT 0,
+    feedback TEXT NOT NULL DEFAULT '',
+    weak_points TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS daily_signs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sign_level TEXT NOT NULL DEFAULT '',
+    sign_text TEXT NOT NULL DEFAULT '',
+    today_advice TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated_at
 ON chat_sessions (updated_at);
 
@@ -79,3 +126,21 @@ ON memories (memory_type);
 
 CREATE INDEX IF NOT EXISTS idx_nightly_reviews_review_date
 ON nightly_reviews (review_date);
+
+CREATE INDEX IF NOT EXISTS idx_study_tasks_created_at
+ON study_tasks (created_at);
+
+CREATE INDEX IF NOT EXISTS idx_study_tasks_status
+ON study_tasks (status);
+
+CREATE INDEX IF NOT EXISTS idx_mistake_cards_reason
+ON mistake_cards (mistake_reason);
+
+CREATE INDEX IF NOT EXISTS idx_mistake_cards_mastery_status
+ON mistake_cards (mastery_status);
+
+CREATE INDEX IF NOT EXISTS idx_checkpoint_records_created_at
+ON checkpoint_records (created_at);
+
+CREATE INDEX IF NOT EXISTS idx_daily_signs_created_at
+ON daily_signs (created_at);

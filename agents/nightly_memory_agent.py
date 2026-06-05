@@ -4,6 +4,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from config import ROOT_DIR, Settings
+from db.database import (
+    get_conversations_by_date,
+    get_memories,
+    get_open_problems,
+    get_sessions_by_date,
+)
 from services.llm_client import LLMClient, LLMConfigError
 
 
@@ -29,11 +35,24 @@ class NightlyMemoryAgent:
     def run(
         self,
         review_date: str,
-        sessions: List[Dict[str, Any]],
-        conversations: List[Dict[str, Any]],
-        memories: List[Dict[str, Any]],
-        open_problems: List[Dict[str, Any]],
+        sessions: Optional[List[Dict[str, Any]]] = None,
+        conversations: Optional[List[Dict[str, Any]]] = None,
+        memories: Optional[List[Dict[str, Any]]] = None,
+        open_problems: Optional[List[Dict[str, Any]]] = None,
     ) -> NightlyMemoryResult:
+        sessions = (
+            sessions if sessions is not None else get_sessions_by_date(review_date)
+        )
+        conversations = (
+            conversations
+            if conversations is not None
+            else get_conversations_by_date(review_date)
+        )
+        memories = memories if memories is not None else get_memories()
+        open_problems = (
+            open_problems if open_problems is not None else get_open_problems()
+        )
+
         payload = {
             "review_date": review_date,
             "sessions": sessions,

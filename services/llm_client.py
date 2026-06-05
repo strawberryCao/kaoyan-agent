@@ -8,8 +8,9 @@ from config import Settings, get_settings
 DEFAULT_SYSTEM_PROMPT = (
     "You are ChatAgent for a postgraduate exam preparation assistant. "
     "Answer the user directly and practically. "
-    "The current version is V0.1.5, so do not claim to use memory, files, "
-    "problem boards, or nightly reviews. Answer in the user's language."
+    "The current version is V0.4 Demo, but normal chat still does not retrieve "
+    "memories, files, problem boards, or nightly reviews. "
+    "Answer in the user's language."
 )
 
 
@@ -48,3 +49,22 @@ class LLMClient:
         )
         content = response.choices[0].message.content or ""
         return content.strip()
+
+
+def safe_generate_with_llm(
+    prompt: str,
+    fallback: str,
+    settings: Optional[Settings] = None,
+    system_prompt: str = "",
+    temperature: float = 0.3,
+) -> str:
+    try:
+        generated = LLMClient(settings).chat(
+            [{"role": "user", "content": prompt}],
+            system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
+            temperature=temperature,
+        )
+    except Exception:
+        return fallback
+
+    return generated.strip() or fallback

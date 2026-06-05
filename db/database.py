@@ -185,6 +185,11 @@ def float_value(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    number = int_value(value, default)
+    return max(minimum, min(maximum, number))
+
+
 def create_chat_session(title: str = DEFAULT_SESSION_TITLE) -> int:
     now = utc_now()
     title = title.strip() or DEFAULT_SESSION_TITLE
@@ -345,10 +350,16 @@ def get_sessions_by_date(date_str: str) -> List[Dict[str, Any]]:
     return rows_to_dicts(rows)
 
 
-def get_all_memories() -> List[Dict[str, Any]]:
+def get_memories(limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    limit_clause = ""
+    params: tuple[Any, ...] = ()
+    if limit is not None:
+        limit_clause = "LIMIT ?"
+        params = (max(1, int_value(limit, 30)),)
+
     with closing(get_connection()) as connection:
         rows = connection.execute(
-            """
+            f"""
             SELECT
                 id,
                 review_id,
@@ -363,10 +374,16 @@ def get_all_memories() -> List[Dict[str, Any]]:
                 updated_at
             FROM memories
             ORDER BY importance DESC, updated_at DESC, id DESC
-            """
+            {limit_clause}
+            """,
+            params,
         ).fetchall()
 
     return rows_to_dicts(rows)
+
+
+def get_all_memories() -> List[Dict[str, Any]]:
+    return get_memories()
 
 
 def get_open_problems() -> List[Dict[str, Any]]:
@@ -400,7 +417,25 @@ def get_open_problems() -> List[Dict[str, Any]]:
     return problems
 
 
-def save_nightly_review(
+def update_problem_status(problem_id: int, status: str) -> bool:
+    status = status.strip()
+    if not status:
+        raise ValueError("status must not be empty")
+
+    with closing(get_connection()) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE problem_board
+            SET status = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (status, utc_now(), problem_id),
+        )
+        connection.commit()
+        return cursor.rowcount > 0
+
+
+def create_nightly_review(
     review_date: str,
     result: Dict[str, Any],
     raw_response: str = "",
@@ -441,7 +476,53 @@ def save_nightly_review(
         return int(cursor.lastrowid)
 
 
-def insert_problem(problem: Dict[str, Any], review_id: Optional[int] = None) -> int:
+def save_nightly_review(
+    review_date: str,
+    result: Dict[str, Any],
+    raw_response: str = "",
+    parse_status: str = "ok",
+) -> int:
+    return create_nightly_review(review_date, result, raw_response, parse_status)
+
+
+def get_latest_nightly_reviews(limit: int = 5) -> List[Dict[str, Any]]:
+    with closing(get_connection()) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                id,
+                review_date,
+                daily_summary,
+                key_events_json,
+                discovered_problems_json,
+                memory_updates_json,
+                next_actions_json,
+                raw_result_json,
+                raw_response,
+                parse_status,
+                created_at
+            FROM nightly_reviews
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (max(1, int_value(limit, 5)),),
+        ).fetchall()
+
+    reviews = rows_to_dicts(rows)
+    for review in reviews:
+        review["key_events"] = json_loads(review.get("key_events_json", "[]"), [])
+        review["discovered_problems"] = json_loads(
+            review.get("discovered_problems_json", "[]"), []
+        )
+        review["memory_updates"] = json_loads(
+            review.get("memory_updates_json", "[]"), []
+        )
+        review["next_actions"] = json_loads(review.get("next_actions_json", "[]"), [])
+        review["raw_result"] = json_loads(review.get("raw_result_json", "{}"), {})
+    return reviews
+
+
+def create_problem(problem: Dict[str, Any], review_id: Optional[int] = None) -> int:
     now = utc_now()
     evidence = problem.get("evidence", [])
     if isinstance(evidence, str):
@@ -487,7 +568,11 @@ def insert_problem(problem: Dict[str, Any], review_id: Optional[int] = None) -> 
         return int(cursor.lastrowid)
 
 
-def insert_memory(
+def insert_problem(problem: Dict[str, Any], review_id: Optional[int] = None) -> int:
+    return create_problem(problem, review_id=review_id)
+
+
+def create_memory(
     memory: Dict[str, Any], review_id: Optional[int] = None
 ) -> Optional[int]:
     operation = str(memory.get("operation") or "insert").strip() or "insert"
@@ -528,3 +613,346 @@ def insert_memory(
         )
         connection.commit()
         return int(cursor.lastrowid)
+
+
+def insert_memory(
+    memory: Dict[str, Any], review_id: Optional[int] = None
+) -> Optional[int]:
+    return create_memory(memory, review_id=review_id)
+
+
+STUDY_TASK_STATUSES = {"todo", "doing", "done", "skipped"}
+MASTERY_STATUSES = {"unmastered", "reviewing", "mastered"}
+
+
+def normalize_status(value: str, allowed: set[str], default: str) -> str:
+    status = (value or "").strip()
+    return status if status in allowed else default
+
+
+def add_study_task(
+    title: str,
+    subject: str = "",
+    estimated_minutes: int = 0,
+    source: str = "",
+    status: str = "todo",
+) -> int:
+    title = title.strip()
+    if not title:
+        raise ValueError("title must not be empty")
+
+    now = utc_now()
+    with closing(get_connection()) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO study_tasks (
+                title,
+                subject,
+                estimated_minutes,
+                source,
+                status,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                title,
+                subject.strip(),
+                max(0, int_value(estimated_minutes, 0)),
+                source.strip(),
+                normalize_status(status, STUDY_TASK_STATUSES, "todo"),
+                now,
+                now,
+            ),
+        )
+        connection.commit()
+        return int(cursor.lastrowid)
+
+
+def list_study_tasks(
+    date_str: Optional[str] = None,
+    limit: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    where_clause = ""
+    params: list[Any] = []
+    if date_str:
+        start_at, end_at = local_day_bounds_utc(date_str)
+        where_clause = "WHERE created_at >= ? AND created_at < ?"
+        params.extend([start_at, end_at])
+
+    limit_clause = ""
+    if limit is not None:
+        limit_clause = "LIMIT ?"
+        params.append(max(1, int_value(limit, 50)))
+
+    with closing(get_connection()) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT
+                id,
+                title,
+                subject,
+                estimated_minutes,
+                source,
+                status,
+                created_at,
+                updated_at
+            FROM study_tasks
+            {where_clause}
+            ORDER BY
+                CASE status
+                    WHEN 'doing' THEN 1
+                    WHEN 'todo' THEN 2
+                    WHEN 'done' THEN 3
+                    ELSE 4
+                END,
+                updated_at DESC,
+                id DESC
+            {limit_clause}
+            """,
+            tuple(params),
+        ).fetchall()
+
+    return rows_to_dicts(rows)
+
+
+def update_study_task_status(task_id: int, status: str) -> bool:
+    status = normalize_status(status, STUDY_TASK_STATUSES, "")
+    if not status:
+        raise ValueError("invalid study task status")
+
+    with closing(get_connection()) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE study_tasks
+            SET status = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (status, utc_now(), task_id),
+        )
+        connection.commit()
+        return cursor.rowcount > 0
+
+
+def add_mistake_card(
+    subject: str,
+    chapter: str,
+    question: str,
+    analysis: str,
+    mistake_reason: str = "unknown",
+    knowledge_points: str = "",
+    review_priority: int = 1,
+    mastery_status: str = "unmastered",
+) -> int:
+    question = question.strip()
+    if not question:
+        raise ValueError("question must not be empty")
+
+    now = utc_now()
+    with closing(get_connection()) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO mistake_cards (
+                subject,
+                chapter,
+                question,
+                analysis,
+                mistake_reason,
+                knowledge_points,
+                review_priority,
+                mastery_status,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                subject.strip(),
+                chapter.strip(),
+                question,
+                analysis.strip(),
+                mistake_reason.strip() or "unknown",
+                knowledge_points.strip(),
+                clamp_int(review_priority, 1, 1, 5),
+                normalize_status(mastery_status, MASTERY_STATUSES, "unmastered"),
+                now,
+                now,
+            ),
+        )
+        connection.commit()
+        return int(cursor.lastrowid)
+
+
+def list_mistake_cards(limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    limit_clause = ""
+    params: tuple[Any, ...] = ()
+    if limit is not None:
+        limit_clause = "LIMIT ?"
+        params = (max(1, int_value(limit, 100)),)
+
+    with closing(get_connection()) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT
+                id,
+                subject,
+                chapter,
+                question,
+                analysis,
+                mistake_reason,
+                knowledge_points,
+                review_priority,
+                mastery_status,
+                created_at,
+                updated_at
+            FROM mistake_cards
+            ORDER BY review_priority DESC, updated_at DESC, id DESC
+            {limit_clause}
+            """,
+            params,
+        ).fetchall()
+
+    return rows_to_dicts(rows)
+
+
+def update_mistake_mastery_status(card_id: int, mastery_status: str) -> bool:
+    mastery_status = normalize_status(mastery_status, MASTERY_STATUSES, "")
+    if not mastery_status:
+        raise ValueError("invalid mastery status")
+
+    with closing(get_connection()) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE mistake_cards
+            SET mastery_status = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (mastery_status, utc_now(), card_id),
+        )
+        connection.commit()
+        return cursor.rowcount > 0
+
+
+def get_mistake_reason_counts() -> List[Dict[str, Any]]:
+    with closing(get_connection()) as connection:
+        rows = connection.execute(
+            """
+            SELECT mistake_reason, COUNT(*) AS count
+            FROM mistake_cards
+            GROUP BY mistake_reason
+            ORDER BY count DESC, mistake_reason ASC
+            """
+        ).fetchall()
+
+    return rows_to_dicts(rows)
+
+
+def add_checkpoint_record(
+    subject: str,
+    chapter: str,
+    user_answer: str,
+    score: int,
+    passed: bool,
+    feedback: str,
+    weak_points: str = "",
+) -> int:
+    now = utc_now()
+    with closing(get_connection()) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO checkpoint_records (
+                subject,
+                chapter,
+                user_answer,
+                score,
+                passed,
+                feedback,
+                weak_points,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                subject.strip(),
+                chapter.strip(),
+                user_answer.strip(),
+                clamp_int(score, 0, 0, 100),
+                1 if passed else 0,
+                feedback.strip(),
+                weak_points.strip(),
+                now,
+            ),
+        )
+        connection.commit()
+        return int(cursor.lastrowid)
+
+
+def list_checkpoint_records(limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    limit_clause = ""
+    params: tuple[Any, ...] = ()
+    if limit is not None:
+        limit_clause = "LIMIT ?"
+        params = (max(1, int_value(limit, 50)),)
+
+    with closing(get_connection()) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT
+                id,
+                subject,
+                chapter,
+                user_answer,
+                score,
+                passed,
+                feedback,
+                weak_points,
+                created_at
+            FROM checkpoint_records
+            ORDER BY created_at DESC, id DESC
+            {limit_clause}
+            """,
+            params,
+        ).fetchall()
+
+    return rows_to_dicts(rows)
+
+
+def add_daily_sign(sign_level: str, sign_text: str, today_advice: str) -> int:
+    now = utc_now()
+    with closing(get_connection()) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO daily_signs (
+                sign_level,
+                sign_text,
+                today_advice,
+                created_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (sign_level.strip(), sign_text.strip(), today_advice.strip(), now),
+        )
+        connection.commit()
+        return int(cursor.lastrowid)
+
+
+def list_daily_signs(limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    limit_clause = ""
+    params: tuple[Any, ...] = ()
+    if limit is not None:
+        limit_clause = "LIMIT ?"
+        params = (max(1, int_value(limit, 20)),)
+
+    with closing(get_connection()) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT id, sign_level, sign_text, today_advice, created_at
+            FROM daily_signs
+            ORDER BY created_at DESC, id DESC
+            {limit_clause}
+            """,
+            params,
+        ).fetchall()
+
+    return rows_to_dicts(rows)
