@@ -11,6 +11,17 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$env:GIT_PAGER = "cat"
+
+try {
+    $utf8 = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList $false
+    [Console]::InputEncoding = $utf8
+    [Console]::OutputEncoding = $utf8
+    $OutputEncoding = $utf8
+}
+catch {
+    Write-Host "WARNING: Could not switch console encoding to UTF-8." -ForegroundColor Yellow
+}
 
 function Write-Step {
     param([string]$Text)
@@ -54,7 +65,7 @@ Write-Step "Current branch"
 Write-Host $branch
 
 Write-Step "Working tree before staging"
-git status --short
+git --no-pager status --short
 
 Write-Step "Stage all changes"
 git add -A
@@ -93,7 +104,7 @@ if ($blockedFiles.Count -gt 0) {
 }
 
 Write-Step "Staged files"
-git diff --cached --name-status
+git --no-pager diff --cached --name-status
 
 if ($RunChecks) {
     Write-Step "Run compile check"
@@ -116,4 +127,4 @@ if ($Push) {
 }
 
 Write-Step "Final status"
-git status --short
+git --no-pager status --short
