@@ -1,0 +1,1 @@
+"""Single-workspace Streamlit components."""

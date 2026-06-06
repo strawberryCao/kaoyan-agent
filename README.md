@@ -1,240 +1,177 @@
 # Kaoyan Problem Discovery Agent
 
-This project is a problem-discovery and adaptive-intervention agent for
-Chinese postgraduate entrance exam preparation.
+Kaoyan Problem Discovery Agent 是面向考研场景的问题发现与自适应干预 Agent。它不是普通聊天机器人，也不是多空间管理工具。当前课程 MVP 只有一个考研备考工作区。
 
-The current implementation is V0.4: V0.3 chat/session and Nightly Memory
-Update behavior is kept stable, with four additional Streamlit demo modules
-for exam-preparation workflows.
+Chat 只是输入渠道，系统中心是证据记录、晚间回顾、结构化问题发现、长期记忆和后续干预。
 
-## Current Scope
+本项目采用 Streamlit + SQLite + LangChain 的 Agentic Workflow 架构。UI 层负责交互，Workflow 层负责编排，Agent 层使用 LangChain create_agent 调用 LLM，结构化输出通过 Pydantic response_format 约束，Repository 层统一管理数据库读写。系统通过在线聊天保存学习证据，通过晚间回顾进行结构化问题发现和长期记忆更新，并将问题写入 Problem Board，形成“证据 → 问题 → 记忆 → 干预”的闭环。
 
-- Streamlit chat UI
-- OpenAI-compatible LLM client
-- SQLite database initialization
-- Multiple chat sessions
-- Sidebar session creation and history switching
-- Conversation logging for user and assistant messages
-- ChatAgent context limited to the current session's latest messages
-- Main chat page with a manual `生成夜间回顾` button
-- Separate internal Nightly Review page with a manual `生成今晚记忆更新` button
-- Separate internal Problem Board page for open problems
-- Separate internal Memories page for long-term memory records
-- NightlyMemoryAgent JSON parsing and fallback
-- `nightly_reviews`, `problem_board`, and `memories` persistence
-- Today dashboard with SQLite-backed study task cards
-- Mistake review pool with generated mistake cards and reason statistics
-- Chapter checkpoint page with generated questions and fallback scoring
-- Daily sign, random task, and low-energy task demo page
-- `.env` based local LLM configuration
+## 产品结构
 
-Not implemented in this version:
-
-- File upload
-- Web search
-- Automatic scheduled jobs
-- Vector database
-- Retrieval from long-term memory during normal chat
-- Plan generation
-
-## Project Structure
+当前 UI 是单一考研备考工作区：
 
 ```text
-.
-|-- app.py
-|-- config.py
-|-- agents/
-|   |-- chat_agent.py
-|   |-- checkpoint_agent.py
-|   |-- intervention_agent.py
-|   |-- mistake_review_agent.py
-|   `-- nightly_memory_agent.py
-|-- db/
-|   |-- database.py
-|   `-- schema.sql
-|-- pages/
-|   |-- 1_Nightly_Review.py
-|   |-- 2_Problem_Board.py
-|   `-- 3_Memories.py
-|-- prompts/
-|   `-- nightly_memory_update_prompt.txt
-|-- services/
-|   `-- llm_client.py
-|-- ui/
-|   |-- demo_pages.py
-|   `-- nightly_review.py
-|-- docs/
-|-- data/
-|   `-- app.db
-|-- .env.example
-|-- requirements.txt
-`-- README.md
+Kaoyan Agent
+-> 全局会话
+-> 常用学习功能
+-> Agent 诊断
+-> 设置
 ```
 
-## Setup
+侧边栏顺序：
 
-Create and activate a virtual environment, then install dependencies:
+1. 新建对话
+2. 常用功能：今日任务 / 学习规划、督学模式、错题复习、成绩趋势
+3. 最近会话
+4. Agent 诊断：晚间回顾、问题板
+5. 轻量激励：运势签
+6. 设置
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
+记忆库在设置里查看，不作为一级导航。
 
-Create a local `.env` file from `.env.example`:
+## 工程结构
+
+正式业务包只有一个：
 
 ```text
-LLM_API_KEY=your_api_key_here
-LLM_BASE_URL=https://api.deepseek.com/v1
-LLM_MODEL=deepseek-v4-flash
+src/kaoyan_agent/
 ```
 
-Do not commit real API keys.
+关键入口：
 
-## Run
+- `app.py`：唯一 Streamlit 启动入口，只做 src bootstrap、`init_db()`、侧边栏导航和页面分发。
+- `src/kaoyan_agent/ui/chat_page.py`：聊天页。
+- `src/kaoyan_agent/ui/task_page.py`：今日任务 / 学习规划。
+- `src/kaoyan_agent/ui/supervision_page.py`：督学模式。
+- `src/kaoyan_agent/ui/mistake_review_page.py`：错题复习。
+- `src/kaoyan_agent/ui/score_trend_page.py`：成绩趋势。
+- `src/kaoyan_agent/ui/nightly_review_page.py`：晚间回顾。
+- `src/kaoyan_agent/ui/problem_board_page.py`：问题板。
+- `src/kaoyan_agent/ui/fortune_page.py`：运势签。
+- `src/kaoyan_agent/ui/settings_page.py`：设置。
 
-```bash
+## 分层边界
+
+- `ui/`：只做展示和按钮交互，不写 SQL，不直接调用 LLM。
+- `workflows/`：串联 repositories、agents、services、schemas。
+- `agents/`：封装推理能力，不直接写数据库。
+- `repositories/`：只做 CRUD，不调 LLM，不拼 prompt。
+- `db/`：只做连接、schema 初始化、兼容迁移和通用 helper。
+- `schemas/`：约束结构化输出。
+- `memory/`：记忆检索、门控、合并、评分等底层能力。
+
+## 数据兼容
+
+历史数据库里可能保留 `projects` 表和 `project_id` 字段。这些只作为兼容层保留，避免破坏已有 `data/app.db`。当前产品和 UI 不把它们作为主概念。
+
+不要删除或重建 `data/app.db`，不要提交真实 `.env` API key。
+
+## Pydantic 与 SQLite
+
+Pydantic schema 和 SQLite schema 不是一回事：
+
+- Pydantic 管 LLM 输出是否合法。
+- SQLite 管合法数据如何持久化。
+
+晚间链路必须保持：
+
+```text
+LLM raw response
+-> NightlyMemoryUpdateOutput.model_validate_json()
+-> typed object
+-> model_dump()
+-> repositories
+-> SQLite
+```
+
+结构化解析失败时，只写 `nightly_reviews.raw_response`、`parse_status="failed"`、`error_message`，不写 `problem_board` 和 `memories`。
+
+## 运行
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e .
 streamlit run app.py
 ```
 
-The app initializes SQLite automatically. The default database path is:
+## 阅读顺序
+
+1. `app.py`
+2. `src/kaoyan_agent/ui/shared.py`
+3. `src/kaoyan_agent/ui/chat_page.py`
+4. `src/kaoyan_agent/ui/task_page.py`
+5. `src/kaoyan_agent/ui/supervision_page.py`
+6. `src/kaoyan_agent/ui/mistake_review_page.py`
+7. `src/kaoyan_agent/ui/score_trend_page.py`
+8. `src/kaoyan_agent/ui/nightly_review_page.py`
+9. `src/kaoyan_agent/ui/settings_page.py`
+10. `src/kaoyan_agent/workflows/nightly_memory_workflow.py`
+11. `src/kaoyan_agent/repositories/`
+
+## 验证
+
+```powershell
+.\.venv\Scripts\python.exe -m compileall app.py src tests
+.\.venv\Scripts\python.exe -m unittest discover -s tests
+.\.venv\Scripts\python.exe -c "from kaoyan_agent.db import init_db; init_db(); print('ok')"
+```
+
+## LangChain Agent Path
+
+ChatAgent, Nightly Memory, and Practice Review now use LangChain first, while keeping the original fallback paths.
+
+Online chat:
 
 ```text
-data/app.db
+chat_page
+-> OnlineSessionWorkflow.handle_user_message()
+-> QueryRewriter
+-> Router
+-> MemoryRetriever
+-> ContextBuilder
+-> ChatAgent
+-> create_agent(tools=[list_open_problems_tool, list_today_tasks_tool, search_memory_tool])
+-> LLMClient.chat() fallback
+-> ChatRepository / RawEventRepository / AgentRunRepository
 ```
 
-During early development, if an old local database conflicts with the current
-schema, it is acceptable to delete `data/app.db` and let the app recreate it:
+ChatAgent tools are read-only. They can list open problems, list today's tasks, and search existing memory/problem context. They never create tasks, update status, delete data, or write SQLite rows.
 
-```bash
-del data\app.db
-streamlit run app.py
-```
-
-## Database
-
-Core tables:
+Nightly review:
 
 ```text
-chat_sessions
-conversations
-memories
-problem_board
-nightly_reviews
-study_tasks
-mistake_cards
-checkpoint_records
-daily_signs
+nightly_review_page
+-> NightlyMemoryWorkflow
+-> NightlyMemoryAgent
+-> create_langchain_model()
+-> create_agent(response_format=NightlyMemoryUpdateOutput)
+-> response["structured_response"]
+-> model_dump()
+-> repositories
+-> SQLite
 ```
 
-Each message belongs to exactly one `chat_session`. Normal chat only uses the
-current session's recent messages; it does not yet retrieve `memories` or
-`problem_board`.
+Practice review:
 
-Problem Board and Memories are internal dashboard pages. The latest nightly
-review result is also displayed on the main chat page after pressing
-`生成夜间回顾`.
-
-The V0.4 demo tables are initialized automatically by `init_db()`:
-
-- `study_tasks`: today's task cards, subject, estimated minutes, source, and
-  `todo/doing/done/skipped` status.
-- `mistake_cards`: saved mistake cards, reason label, knowledge points, review
-  priority, and `unmastered/reviewing/mastered` status.
-- `checkpoint_records`: chapter checkpoint answers, score, pass flag, feedback,
-  and weak points.
-- `daily_signs`: saved daily sign level, sign text, and advice.
-
-## Demo Pages
-
-The main `app.py` sidebar has these pages:
-
-1. `聊天`: keeps the original chat and manual Nightly Memory Update flow.
-2. `今日作战台`: add tasks, generate default examples, and update task status
-   with `开始` / `完成` / `放弃`.
-3. `错题复刷池`: enter a mistake question, generate a mistake card, save it, view
-   reason statistics, and update mastery status.
-4. `章节闯关验收`: generate 3 checkpoint questions plus 1 retelling question,
-   submit an answer, save a score, and create a review task when not passed.
-5. `上岸签 / 随机任务`: generate a daily sign, generate a random low-pressure
-   task, or convert a low-energy state into a 3-5 minute task.
-
-## Fallback Demo Logic
-
-The demo does not require an API key to be usable.
-
-- `safe_generate_with_llm()` first tries the configured OpenAI-compatible
-  client, then returns a fallback string on any error.
-- Mistake cards fall back to rule-based reason inference and a template
-  analysis.
-- Checkpoint questions fall back to chapter templates; checkpoint scoring falls
-  back to answer-length bands: under 30 chars = 50, 30-100 chars = 70, over
-  100 chars = 80.
-- Daily signs, random tasks, and low-energy tasks fall back to local templates.
-
-To improve the real LLM behavior later, update these modules:
-
-- `agents/mistake_review_agent.py`
-- `agents/checkpoint_agent.py`
-- `agents/intervention_agent.py`
-- `services/llm_client.py`
-
-## Verify Chat Behavior
-
-1. Open the Streamlit app.
-2. Confirm the main page only shows chat, new-session controls, and chat history.
-3. Send a message in the default session.
-4. Click `新建对话` in the sidebar.
-5. Send a different message.
-6. Click the old session in the sidebar and confirm only that session's
-   messages are shown.
-7. In one session, send `我叫小李，正在复习 408。`
-8. Then send `我刚才说我在复习什么？`
-9. Confirm the assistant answers from the same session context.
-10. Switch to a new session and ask the same question again; it should not know
-    the previous session's content.
-
-Check saved sessions and messages:
-
-```bash
-python -c "import sqlite3; c=sqlite3.connect('data/app.db'); print(c.execute('select id, title, updated_at from chat_sessions order by updated_at desc').fetchall()); print(c.execute('select session_id, role, content from conversations order by id').fetchall())"
+```text
+mistake_review_panel
+-> PlanningWorkflow.generate_and_save_practice_card()
+-> PracticeReviewAgent
+-> create_agent(response_format=PracticeReviewCard)
+-> normalize_card()
+-> PracticeReviewRepository.create_card()
 ```
 
-## Verify Nightly Memory Update
+`LLMClient.chat()` remains the stable OpenAI-compatible fallback. The LangChain
+factory is `create_langchain_model(settings, temperature=0.3)`. It tries
+`langchain_deepseek.ChatDeepSeek` first, then `langchain_openai.ChatOpenAI`.
+For DeepSeek structured output, prefer a tool-calling/structured-output-capable
+model such as `deepseek-chat`; do not use `deepseek-reasoner` as the main model
+for this path.
 
-1. Create a few conversations and send study review messages.
-2. Click `生成夜间回顾` on the main chat page.
-3. Alternatively, open the `Nightly Review` page from the Streamlit sidebar and
-   click `生成今晚记忆更新`.
-4. Confirm the page shows `今晚记忆更新结果` and a `daily_summary`.
-5. Open the `Problem Board` page and confirm open problems are shown there, or
-   that the empty state is clear.
-6. Open the `Memories` page and confirm memory records are shown there, or that
-   the empty state is clear.
-7. Confirm the chat page still does not display Problem Board or Memories.
-8. Confirm SQLite has a `nightly_reviews` record.
+This version intentionally does not use LangGraph. A future version can consider mapping `OnlineSessionWorkflow` to LangGraph StateGraph only if the workflow becomes complex enough to need state-graph orchestration.
 
-Check saved nightly data:
+References:
 
-```bash
-python -c "import sqlite3; c=sqlite3.connect('data/app.db'); print('reviews', c.execute('select id, review_date, parse_status, daily_summary from nightly_reviews order by id desc limit 3').fetchall()); print('problems', c.execute('select id, problem_type, subject, status, review_id from problem_board order by id desc limit 5').fetchall()); print('memories', c.execute('select id, memory_type, content, review_id from memories order by id desc limit 5').fetchall())"
-```
-
-If the prompt file is missing, the LLM is unavailable, or the model does not
-return valid JSON, the app saves a fallback `nightly_reviews` record with a
-non-`ok` `parse_status` instead of crashing.
-
-## Roadmap
-
-Follow `docs/ROADMAP.md`.
-
-- V0.1: Basic chat and conversation logging
-- V0.1.5: Session management and scoped multi-turn context
-- V0.2: Chat/session stabilization
-- V0.3: Nightly Memory Update and Problem Discovery MVP
-- V0.4: Streamlit business demo modules
-- V0.5: Clarification Agent
-- V0.6: Plan Agent
-- V0.7: File Management
-- V0.8: Web Search
-- V0.9: Skills and self-evolution
+- [LangChain structured output](https://docs.langchain.com/oss/python/langchain/structured-output)
+- [ChatDeepSeek integration](https://docs.langchain.com/oss/python/integrations/chat/deepseek)
+- [ChatOpenAI integration](https://docs.langchain.com/oss/python/integrations/chat/openai)

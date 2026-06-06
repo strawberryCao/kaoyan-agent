@@ -1,4 +1,4 @@
-# Roadmap
+﻿# Roadmap
 
 ## V0.1 Basic Chat and Conversation Logging
 
@@ -158,3 +158,5 @@ Done when:
 
 - skills can be selected by trigger
 - strategy updates are stored and reused
+
+

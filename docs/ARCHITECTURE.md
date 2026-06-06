@@ -1,193 +1,124 @@
 # Architecture
 
-## Center of the Architecture
+This project uses a Streamlit + SQLite + LangChain Agentic Workflow architecture. UI code handles interaction, workflows orchestrate the application flow, agents call LLMs and read-only tools through LangChain, repositories own SQLite CRUD, and schemas constrain structured LLM output.
 
-The center of this project is not ChatAgent.
+## Product Information Architecture
 
-The center is ProblemDiscoveryAgent.
-
-ChatAgent is only the front-stage interaction layer.
-
-## System Overview
-
-User Interaction
-→ Conversation Logging
-→ Nightly Memory Update
-→ Problem Discovery
-→ Problem Board
-→ Memory Update
-→ Next-Day Intervention
-
-## Online Loop
-
-The online loop handles real-time user interaction.
-
-User input
-→ Context building
-→ Optional clarification
-→ ChatAgent response
-→ Conversation saved
-
-In the first MVP, the online loop can stay simple.
-
-## Offline Loop
-
-The offline loop is the core.
-
-Daily conversations
-→ NightlyMemoryAgent
-→ key event extraction
-→ valuable problem discovery
-→ memory update
-→ problem board update
-→ next action generation
-
-## Core Components
-
-### ChatAgent
-
-Handles normal user-facing answers.
-
-### ClarificationAgent
-
-Asks necessary clarification questions when the user’s request is vague.
-
-Rules:
-
-- Ask only when the missing information significantly affects answer quality.
-- Ask at most two questions.
-- Avoid unnecessary questioning.
-- If a reasonable assumption is enough, answer with the assumption.
-
-### NightlyMemoryAgent
-
-Runs at night or through a manual button in the MVP.
-
-Responsibilities:
-
-- read today’s conversations
-- read existing memories
-- read open problems
-- summarize daily events
-- discover valuable problems
-- generate memory updates
-- generate next actions
-
-### ProblemDiscoveryAgent
-
-Discovers valuable problems.
-
-Each problem should include:
-
-- problem_type
-- subject
-- description
-- evidence
-- root_cause
-- severity
-- confidence
-- value_score
-- suggested_action
-- status
-
-### MemoryAgent
-
-Controls long-term memory.
-
-It should not blindly store all conversations.
-
-Memory should be inserted, updated, merged, or skipped.
-
-### PlanAgent
-
-Generates next-day plans based on problems, memory, and unfinished tasks.
-
-### FileAgent
-
-Handles uploaded files.
-
-Responsibilities:
-
-- upload
-- save
-- parse
-- summarize
-- index
-- retrieve
-
-### SearchAgent
-
-Handles web search when current or external information is needed.
-
-Search should be used for:
-
-- current exam policy
-- admission information
-- latest materials
-- official documents
-- external verification
-
-## Problem Board
-
-A blackboard-style shared table for all discovered problems.
-
-The Problem Board is used by:
-
-- NightlyMemoryAgent
-- MemoryAgent
-- PlanAgent
-- future ChatAgent context retrieval
-
-## Data Stores
-
-### SQLite
-
-Used for:
-
-- conversations
-- files
-- file_chunks
-- memories
-- problem_board
-- daily_reviews
-- nightly_reviews
-- daily_plans
-- tasks
-
-### File Storage
-
-Original files go to:
+The current MVP is one kaoyan preparation workspace:
 
 ```text
-data/uploads/
+Kaoyan Agent
+-> global chat sessions
+-> common study functions
+-> agent diagnostics
+-> settings
 ```
 
-Parsed text goes to:
+Sidebar order:
+
+1. New chat
+2. Common functions: Today Task / Study Plan, Supervision Mode, Mistake Review, Score Trend
+3. Recent chats
+4. Agent diagnostics: Nightly Review, Problem Board
+5. Light encouragement: Fortune Card
+6. Settings
+
+Memory is a lower-level capability. The settings page provides the current memory viewer.
+
+## Package Layout
 
 ```text
-data/parsed/
+src/kaoyan_agent/
+  agents/        Agent capability wrappers; no SQL writes
+  core/          settings, paths, JSON parser, container
+  db/            schema, connection, initialization, migrations
+  repositories/  SQLite CRUD boundary; no LLM calls
+  schemas/       dataclass contracts and Pydantic structured outputs
+  services/      LLM / LangChain-ready client
+  prompts/       prompt registry
+  workflows/     application orchestration
+  ui/            Streamlit pages and components
+  memory/        memory-domain logic
 ```
 
-## First MVP Architecture
+Root business packages such as `agents/`, `db/`, `services/`, and `ui/` should not be restored. Use `from kaoyan_agent...` imports.
 
-The first MVP should include:
+## Layer Rules
 
-- Streamlit app
-- LLM client
-- SQLite database
-- conversations table
-- memories table
-- problem_board table
-- nightly_reviews table
-- Nightly Memory Update button
+- `app.py`: Streamlit setup, `init_db()`, sidebar navigation, page dispatch.
+- `ui/`: render and collect interactions only.
+- `workflows/`: orchestrate repositories, agents, services, and schemas.
+- `agents/`: encapsulate reasoning; do not write the database.
+- `repositories/`: CRUD only; do not call LLMs or build prompts.
+- `db/`: connection, schema initialization, migrations, and helpers.
+- `schemas/`: structured-output contracts.
+- `memory/`: retrieval, gating, merging, and scoring logic.
 
-## Future Architecture Extensions
+## Core Chains
 
-Later versions can add:
+Online chat:
 
-- MetaController
-- ClarificationAgent
-- FileAgent
-- SearchAgent
-- Skills registry
-- lightweight self-evolution of prompts and strategies
+```text
+app.py
+-> chat_page
+-> OnlineSessionWorkflow
+-> ChatRepository / RawEventRepository / AgentRunRepository
+-> QueryRewriter + Router + MemoryRetriever + ContextBuilder
+-> ChatAgent
+-> LangChain create_agent with read-only tools
+-> LLMClient.chat fallback
+```
+
+Nightly review:
+
+```text
+nightly_review_page
+-> nightly_review_panel
+-> NightlyMemoryWorkflow
+-> NightlyMemoryAgent
+-> LangChain create_agent(response_format=NightlyMemoryUpdateOutput)
+-> response["structured_response"]
+-> raw JSON fallback with NightlyMemoryUpdateOutput.model_validate_json()
+-> model_dump()
+-> nightly_review_repository
+-> problem_repository / memory_repository / graphs / agent_runs
+-> SQLite
+```
+
+Practice review:
+
+```text
+mistake_review_panel
+-> PlanningWorkflow.generate_and_save_practice_card()
+-> PracticeReviewAgent
+-> LangChain create_agent(response_format=PracticeReviewCard)
+-> normalize_card()
+-> PracticeReviewRepository.create_card()
+-> SQLite
+```
+
+## LangChain Boundary
+
+- `services/llm_client.py` exposes `create_langchain_model()`, preferring `ChatDeepSeek` and falling back to `ChatOpenAI`.
+- `NightlyMemoryAgent` and `PracticeReviewAgent` use Pydantic `response_format` and read `response["structured_response"]`.
+- `ChatAgent` uses only read-only tools: `list_open_problems_tool`, `list_today_tasks_tool`, and `search_memory_tool`.
+- Agents do not write SQLite. Database writes remain in workflows through repositories.
+- This version does not implement LangGraph. A future version can consider mapping `OnlineSessionWorkflow` to LangGraph StateGraph only if more complex state-graph orchestration is needed.
+
+## Database Compatibility
+
+The SQLite database may still contain `projects` and `project_id` from earlier iterations. Keep them as compatibility fields for now. The current UI and docs do not treat them as product architecture.
+
+Do not delete `data/app.db`, do not rebuild it, and do not drop compatibility columns in this task.
+
+## Pydantic Structured Output
+
+`src/kaoyan_agent/schemas/nightly_memory.py` defines the structured output for Nightly Memory Update. Any LLM output that can affect `problem_board`, `memories`, or later workflow control must pass Pydantic validation first.
+
+Failure behavior:
+
+- save raw response
+- save `parse_status="failed"`
+- save `error_message`
+- do not write `problem_board`
+- do not write `memories`

@@ -1,3 +1,13 @@
+﻿# Runtime dependencies
 streamlit>=1.32
 openai>=1.0
 python-dotenv>=1.0
+pydantic>=2
+langchain>=1.0
+langchain-deepseek>=0.1
+langchain-openai>=1.0
+
+# Build tools required by pyproject.toml for editable installs.
+setuptools>=68
+wheel
+
