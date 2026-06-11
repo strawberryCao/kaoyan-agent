@@ -1,7 +1,7 @@
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
-from kaoyan_agent.core.settings import Settings
+from kaoyan_agent.core.settings import Settings, get_settings
 from kaoyan_agent.schemas.focus import (
     FocusReportOutput,
     FocusStateRecognitionOutput,
@@ -10,6 +10,7 @@ from kaoyan_agent.services.llm_client import (
     run_structured_agent,
     run_structured_vision_agent,
 )
+from kaoyan_agent.vision.yolo_focus_detector import LocalYoloFocusDetector
 
 
 ALLOWED_STATES = {"focused", "away", "distracted", "blocked", "unknown"}
@@ -47,7 +48,8 @@ Return structured output only.
 
 class FocusSupervisionAgent:
     def __init__(self, settings: Optional[Settings] = None):
-        self.settings = settings
+        self.settings = settings or get_settings()
+        self._local_detector: Optional[LocalYoloFocusDetector] = None
 
     def recognize_snapshot(
         self,
@@ -60,6 +62,10 @@ class FocusSupervisionAgent:
             "confidence": 0.0,
             "explanation": "Camera snapshot was recorded, but AI recognition was unavailable.",
         }
+        local_result = self.recognize_with_local_model(image_bytes)
+        if local_result:
+            return self.normalize_recognition(local_result, fallback)
+
         prompt = (
             "Classify this camera snapshot for a study supervision session. "
             "Use one of: focused, away, distracted, blocked, unknown. "
@@ -80,6 +86,23 @@ class FocusSupervisionAgent:
             result = self.normalize_recognition(fallback, fallback)
             result["generation_error"] = str(exc)
             return result
+
+    def recognize_with_local_model(self, image_bytes: bytes) -> Optional[Dict[str, Any]]:
+        settings = self.settings
+        model_path = getattr(settings, "focus_local_model_path", None)
+        if not model_path:
+            return None
+
+        try:
+            if self._local_detector is None:
+                self._local_detector = LocalYoloFocusDetector(
+                    model_path=model_path,
+                    confidence=getattr(settings, "focus_local_model_confidence", 0.35),
+                )
+            return self._local_detector.recognize(image_bytes)
+        except Exception:
+            self._local_detector = None
+            return None
 
     def generate_report(
         self,
@@ -111,7 +134,7 @@ class FocusSupervisionAgent:
         state_type = str(recognition.get("state_type") or "").strip()
         if state_type not in ALLOWED_STATES:
             state_type = fallback["state_type"]
-        return {
+        normalized = {
             "state_type": state_type,
             "confidence": self.clamp_float(
                 recognition.get("confidence"),
@@ -123,6 +146,11 @@ class FocusSupervisionAgent:
                 recognition.get("explanation") or fallback["explanation"]
             ).strip(),
         }
+        if recognition.get("recognition_source"):
+            normalized["recognition_source"] = str(recognition["recognition_source"])
+        if recognition.get("metrics") is not None:
+            normalized["metrics"] = recognition["metrics"]
+        return normalized
 
     def build_report_prompt(
         self,

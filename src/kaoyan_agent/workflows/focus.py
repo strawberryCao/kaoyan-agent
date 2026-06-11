@@ -44,6 +44,7 @@ class FocusWorkflow:
         state_type: str,
         confidence: float = 0.0,
         explanation: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> int:
         event_id = self.focus_repository.record_state_event(
             focus_session_id=focus_session_id,
@@ -52,6 +53,14 @@ class FocusWorkflow:
             explanation=explanation,
         )
         session = self.focus_repository.get_session(focus_session_id) or {}
+        event_metadata = {
+            "focus_session_id": focus_session_id,
+            "state_type": state_type,
+            "confidence": confidence,
+        }
+        if metadata:
+            event_metadata.update(metadata)
+
         self.raw_event_repository.create(
             project_id=session.get("project_id") or self.project_id,
             content=(
@@ -61,11 +70,7 @@ class FocusWorkflow:
             role="system",
             source_type="focus_state_event",
             source_id=event_id,
-            metadata={
-                "focus_session_id": focus_session_id,
-                "state_type": state_type,
-                "confidence": confidence,
-            },
+            metadata=event_metadata,
         )
         return event_id
 
@@ -86,6 +91,10 @@ class FocusWorkflow:
             state_type=recognition["state_type"],
             confidence=float(recognition["confidence"]),
             explanation=recognition["explanation"],
+            metadata={
+                "recognition_source": recognition.get("recognition_source", "multimodal"),
+                "metrics": recognition.get("metrics", {}),
+            },
         )
         return {**recognition, "event_id": event_id}
 

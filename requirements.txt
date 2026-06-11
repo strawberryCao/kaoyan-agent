@@ -7,6 +7,7 @@ langchain>=1.0
 langchain-deepseek>=0.1
 langchain-openai>=1.0
 streamlit-webrtc>=0.47
+ultralytics>=8.3
 
 # Build tools required by pyproject.toml for editable installs.
 setuptools>=68

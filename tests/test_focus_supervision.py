@@ -7,6 +7,7 @@ from unittest.mock import patch
 from kaoyan_agent.agents.focus_supervision_agent import FocusSupervisionAgent
 from kaoyan_agent.core.settings import Settings
 from kaoyan_agent.db import database
+from kaoyan_agent.vision.focus_state_rules import FocusStateRuleEngine
 from kaoyan_agent.workflows.focus import FocusWorkflow
 
 
@@ -65,6 +66,35 @@ class FocusSupervisionAgentTest(unittest.TestCase):
         self.assertEqual(report["effective_focus_minutes"], 10)
         self.assertEqual(report["away_count"], 1)
         self.assertEqual(report["distracted_count"], 1)
+
+
+class FocusStateRuleEngineTest(unittest.TestCase):
+    def test_rule_engine_maps_study_behavior_to_focused(self):
+        result = FocusStateRuleEngine().classify(
+            [{"label": "reading", "confidence": 0.8}]
+        )
+
+        self.assertEqual(result.state_type, "focused")
+
+    def test_rule_engine_maps_phone_to_distracted(self):
+        result = FocusStateRuleEngine().classify(
+            [{"label": "using_phone", "confidence": 0.82}]
+        )
+
+        self.assertEqual(result.state_type, "distracted")
+        self.assertEqual(result.metrics["phone_count"], 1)
+
+    def test_rule_engine_maps_standing_to_away(self):
+        result = FocusStateRuleEngine().classify(
+            [{"label": "standing", "confidence": 0.76}]
+        )
+
+        self.assertEqual(result.state_type, "away")
+
+    def test_rule_engine_maps_empty_frame_to_away(self):
+        result = FocusStateRuleEngine().classify([])
+
+        self.assertEqual(result.state_type, "away")
 
 
 class FocusWorkflowTest(unittest.TestCase):

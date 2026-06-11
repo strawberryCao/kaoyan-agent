@@ -20,6 +20,7 @@ dependencies = [
   "langchain-community>=0.4.2",
   "pandas>=2.3.3",
   "streamlit-webrtc>=0.47",
+  "ultralytics>=8.3",
 ]
 
 [tool.setuptools.packages.find]
