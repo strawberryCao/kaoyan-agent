@@ -161,6 +161,26 @@ mistake_review_panel
 -> PracticeReviewRepository.create_card()
 ```
 
+Supervision mode:
+
+```text
+supervision_page
+-> render_pomodoro_supervision_panel()
+-> FocusWorkflow
+-> FocusSupervisionAgent
+-> run_structured_vision_agent(response_format=FocusStateRecognitionOutput)
+-> FocusRepository / RawEventRepository
+-> focus_state_events / focus_reports / raw_events
+```
+
+Camera supervision uses a `streamlit-webrtc` video stream plus an in-memory
+latest-frame sampler. After the user authorizes the camera, the app periodically
+recognizes the current study state without asking the learner to click during
+the focus block. The app does not persist raw camera images by default; it stores
+state labels, confidence, explanations, and generated focus-report signals for
+nightly review. If the configured model or provider does not support vision, the
+workflow records an `unknown` state and keeps a local fallback report path.
+
 `LLMClient.chat()` remains the stable OpenAI-compatible fallback. The LangChain
 factory is `create_langchain_model(settings, temperature=0.3)`. It tries
 `langchain_deepseek.ChatDeepSeek` first, then `langchain_openai.ChatOpenAI`.

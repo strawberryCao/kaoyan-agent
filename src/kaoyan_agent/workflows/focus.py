@@ -1,6 +1,8 @@
-﻿from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional
 
+from kaoyan_agent.agents.focus_supervision_agent import FocusSupervisionAgent
 from kaoyan_agent.repositories.focus import FocusRepository
+from kaoyan_agent.repositories.raw_events import RawEventRepository
 
 
 class FocusWorkflow:
@@ -9,9 +11,13 @@ class FocusWorkflow:
     def __init__(
         self,
         focus_repository: FocusRepository | None = None,
+        raw_event_repository: RawEventRepository | None = None,
+        supervision_agent: FocusSupervisionAgent | None = None,
         project_id: Optional[int] = None,
     ):
         self.focus_repository = focus_repository or FocusRepository()
+        self.raw_event_repository = raw_event_repository or RawEventRepository()
+        self.supervision_agent = supervision_agent or FocusSupervisionAgent()
         self.project_id = project_id
 
     def start_focus_session(
@@ -39,12 +45,49 @@ class FocusWorkflow:
         confidence: float = 0.0,
         explanation: str = "",
     ) -> int:
-        return self.focus_repository.record_state_event(
+        event_id = self.focus_repository.record_state_event(
             focus_session_id=focus_session_id,
             state_type=state_type,
             confidence=confidence,
             explanation=explanation,
         )
+        session = self.focus_repository.get_session(focus_session_id) or {}
+        self.raw_event_repository.create(
+            project_id=session.get("project_id") or self.project_id,
+            content=(
+                f"Focus supervision state: {state_type}; "
+                f"confidence={confidence:.2f}; explanation={explanation}"
+            ),
+            role="system",
+            source_type="focus_state_event",
+            source_id=event_id,
+            metadata={
+                "focus_session_id": focus_session_id,
+                "state_type": state_type,
+                "confidence": confidence,
+            },
+        )
+        return event_id
+
+    def recognize_camera_snapshot(
+        self,
+        focus_session_id: int,
+        image_bytes: bytes,
+        mime_type: str = "image/png",
+        context: str = "",
+    ) -> Dict[str, Any]:
+        recognition = self.supervision_agent.recognize_snapshot(
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+            context=context,
+        )
+        event_id = self.record_camera_state(
+            focus_session_id=focus_session_id,
+            state_type=recognition["state_type"],
+            confidence=float(recognition["confidence"]),
+            explanation=recognition["explanation"],
+        )
+        return {**recognition, "event_id": event_id}
 
     def finish_focus_session(
         self,
@@ -68,7 +111,46 @@ class FocusWorkflow:
             note=reflection,
         )
         if report:
-            return self.focus_repository.create_report(focus_session_id, report)
-        return None
+            report_id = self.focus_repository.create_report(focus_session_id, report)
+            self.record_report_raw_event(focus_session_id, report_id, report)
+            return report_id
 
+        session = self.focus_repository.get_session(focus_session_id) or {}
+        state_events = self.focus_repository.list_state_events(focus_session_id)
+        timeline_events = self.focus_repository.list_timeline_events(focus_session_id)
+        generated_report = self.supervision_agent.generate_report(
+            session=session,
+            state_events=state_events,
+            timeline_events=timeline_events,
+        )
+        report_id = self.focus_repository.create_report(focus_session_id, generated_report)
+        self.record_report_raw_event(focus_session_id, report_id, generated_report)
+        return report_id
 
+    def record_report_raw_event(
+        self,
+        focus_session_id: int,
+        report_id: int,
+        report: Dict[str, Any],
+    ) -> None:
+        session = self.focus_repository.get_session(focus_session_id) or {}
+        self.raw_event_repository.create(
+            project_id=session.get("project_id") or self.project_id,
+            content=(
+                "Focus supervision report: "
+                f"quality={report.get('focus_quality', '')}; "
+                f"summary={report.get('ai_summary', '')}; "
+                f"problem_signal={report.get('possible_problem_signal', '')}; "
+                f"suggested_action={report.get('suggested_action', '')}"
+            ),
+            role="system",
+            source_type="focus_report",
+            source_id=report_id,
+            metadata={
+                "focus_session_id": focus_session_id,
+                "focus_quality": report.get("focus_quality", ""),
+            },
+        )
+
+    def get_focus_report(self, report_id: int) -> Optional[Dict[str, Any]]:
+        return self.focus_repository.get_report(report_id)

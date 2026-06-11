@@ -1,7 +1,7 @@
 ﻿from contextlib import closing
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from kaoyan_agent.db.database import get_connection, json_dumps, utc_now
+from kaoyan_agent.db.database import get_connection, json_dumps, rows_to_dicts, utc_now
 
 
 class FocusRepository:
@@ -80,6 +80,67 @@ class FocusRepository:
             connection.commit()
             return int(cursor.lastrowid)
 
+    def get_session(self, focus_session_id: int) -> Optional[Dict[str, Any]]:
+        with closing(get_connection()) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    id,
+                    project_id,
+                    task_id,
+                    planned_minutes,
+                    actual_minutes,
+                    pause_count,
+                    completion_status,
+                    reflection,
+                    started_at,
+                    ended_at,
+                    created_at,
+                    updated_at
+                FROM focus_sessions
+                WHERE id = ?
+                """,
+                (focus_session_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_state_events(self, focus_session_id: int) -> List[Dict[str, Any]]:
+        with closing(get_connection()) as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id,
+                    focus_session_id,
+                    state_type,
+                    confidence,
+                    explanation,
+                    created_at
+                FROM focus_state_events
+                WHERE focus_session_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (focus_session_id,),
+            ).fetchall()
+        return rows_to_dicts(rows)
+
+    def list_timeline_events(self, focus_session_id: int) -> List[Dict[str, Any]]:
+        with closing(get_connection()) as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id,
+                    focus_session_id,
+                    event_type,
+                    note,
+                    created_at
+                FROM focus_timeline_events
+                WHERE focus_session_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (focus_session_id,),
+            ).fetchall()
+        return rows_to_dicts(rows)
+
     def finish_session(
         self,
         focus_session_id: int,
@@ -157,4 +218,29 @@ class FocusRepository:
             )
             connection.commit()
             return int(cursor.lastrowid)
+
+    def get_report(self, report_id: int) -> Optional[Dict[str, Any]]:
+        with closing(get_connection()) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    id,
+                    focus_session_id,
+                    effective_focus_minutes,
+                    away_count,
+                    distracted_count,
+                    blocked_count,
+                    longest_focus_minutes,
+                    focus_quality,
+                    ai_summary,
+                    possible_problem_signal,
+                    suggested_action,
+                    raw_result_json,
+                    created_at
+                FROM focus_reports
+                WHERE id = ?
+                """,
+                (report_id,),
+            ).fetchone()
+        return dict(row) if row else None
 

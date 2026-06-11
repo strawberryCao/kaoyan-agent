@@ -64,7 +64,10 @@ Primary files:
 - `src/kaoyan_agent/repositories/supervision_repository.py`
 - `src/kaoyan_agent/repositories/fortune_repository.py`
 
-Boundary: Supervision Mode is an independent page. Do not implement camera recognition in the current MVP.
+Boundary: Supervision Mode is an independent page. Task E extends the existing
+pomodoro flow with camera snapshot recognition, state-event persistence, and a
+focus report. UI must not save raw camera images; only recognition results and
+report signals should enter SQLite.
 
 ## Member 5: Settings And Runtime Info
 

@@ -1,10 +1,14 @@
+import base64
 from typing import Any, Dict, List, Optional, Type
 
 from pydantic import BaseModel
 
 from kaoyan_agent.core.settings import Settings, get_settings
-from langchain_deepseek import ChatDeepSeek
-from langchain.agents import create_agent
+
+try:
+    from langchain.agents import create_agent
+except ModuleNotFoundError:
+    create_agent = None
 
 
 
@@ -29,6 +33,7 @@ def create_langchain_model(
         raise LLMConfigError("LLM_API_KEY is missing. Create a .env file first.")
 
     try:
+        from langchain_deepseek import ChatDeepSeek
 
         kwargs: Dict[str, Any] = {
             "api_key": settings.llm_api_key,
@@ -79,10 +84,10 @@ def _build_agent(
     Raises if the langchain package is unavailable so callers can fall back.
     """
 
+    llm = create_langchain_model(settings, temperature=temperature)
     if create_agent is None:
         raise LLMConfigError(LANGCHAIN_MISSING_MESSAGE)
 
-    llm = create_langchain_model(settings, temperature=temperature)
     kwargs: Dict[str, Any] = {
         "model": llm,
         "tools": tools or [],
@@ -143,6 +148,49 @@ def run_structured_agent(
     if structured_response is None:
         raise ValueError("LangChain structured_response is empty.")
     return response_format.model_validate(structured_response)
+
+
+def run_structured_vision_agent(
+    response_format: Type[BaseModel],
+    prompt: str,
+    image_bytes: bytes,
+    mime_type: str,
+    *,
+    system_prompt: str,
+    settings: Optional[Settings] = None,
+    temperature: float = 0.2,
+) -> BaseModel:
+    """Structured multimodal call for camera snapshots.
+
+    The image is sent as an in-memory data URL and is not persisted by this
+    helper. Providers without vision support should raise so callers can fall
+    back to a safe ``unknown`` result.
+    """
+
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage
+    except ModuleNotFoundError as exc:
+        raise LLMConfigError(LANGCHAIN_MISSING_MESSAGE) from exc
+
+    llm = create_langchain_model(settings, temperature=temperature)
+    if not hasattr(llm, "with_structured_output"):
+        raise ValueError("Current LangChain model does not support structured output.")
+
+    encoded_image = base64.b64encode(image_bytes).decode("ascii")
+    data_url = f"data:{mime_type};base64,{encoded_image}"
+    structured_llm = llm.with_structured_output(response_format)
+    response = structured_llm.invoke(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ]
+            ),
+        ]
+    )
+    return response_format.model_validate(response)
 
 
 def run_text_agent(
