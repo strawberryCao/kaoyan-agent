@@ -23,7 +23,7 @@ class AbstractMemoryStore(ABC):
         query: str,
         top_k: int,
         filter: dict[str, Any],
-    ) -> tuple[list[Memory], float]:
+    ) -> list[tuple[Memory, float]]:
         pass
 
 
@@ -46,7 +46,7 @@ class AbstractProblemStore(ABC):
         query: str,
         top_k: int,
         filter: dict[str, Any],
-    ) -> tuple[list[Problem], float]:
+    ) -> list[tuple[Problem, float]]:
         pass
 
 
@@ -69,5 +69,5 @@ class AbstractDiaryStore(ABC):
         query: str,
         top_k: int,
         filter: dict[str, Any],
-    ) -> tuple[list[Diary], float]:
+    ) -> list[tuple[Diary, float]]:
         pass
