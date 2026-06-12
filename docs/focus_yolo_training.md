@@ -39,6 +39,46 @@ HuggingFace: https://huggingface.co/datasets/Whiffe/SCB-Dataset
 Do not download the full dataset until the team confirms license, size, and
 network/storage budget.
 
+The first local-model iteration should use the already-downloaded
+SCB-Dataset3 YOLO archive. It is smaller, already available locally, and covers
+the first useful product states: reading/writing as focused, phone usage as
+distracted, and head-down/leaning behavior as fatigue or distraction. Larger
+SCB releases can be evaluated after the camera-to-report loop works end to end.
+
+## Preparing SCB-Dataset3
+
+Extract these zip files from the local `.rar` archive first:
+
+```text
+SCB-Dataset3 yolo dataset\5k_HRW_yolo_Dataset_jpg.zip
+SCB-Dataset3 yolo dataset\0.671k_university_yolo_Dataset.zip
+```
+
+Then combine them into a standard YOLO folder:
+
+```powershell
+python scripts/prepare_scb_dataset.py `
+  --zip "d:\摄像头状态数据\inspect_scb\SCB-Dataset3 yolo dataset\5k_HRW_yolo_Dataset_jpg.zip" `
+  --zip "d:\摄像头状态数据\inspect_scb\SCB-Dataset3 yolo dataset\0.671k_university_yolo_Dataset.zip" `
+  --output "d:\kaoyan_datasets\SCB-Dataset3-prepared" `
+  --reset
+```
+
+The script writes:
+
+```text
+d:\kaoyan_datasets\SCB-Dataset3-prepared\data.yaml
+d:\kaoyan_datasets\SCB-Dataset3-prepared\images\train
+d:\kaoyan_datasets\SCB-Dataset3-prepared\images\val
+d:\kaoyan_datasets\SCB-Dataset3-prepared\labels\train
+d:\kaoyan_datasets\SCB-Dataset3-prepared\labels\val
+```
+
+Use an ASCII-only prepared dataset path for Ultralytics on Windows. Chinese
+paths may display or resolve incorrectly in some Anaconda/Ultralytics calls.
+The preparation script also drops invalid YOLO label rows, such as out-of-range
+coordinates, so one bad box does not make an entire image unusable.
+
 ## Label Mapping
 
 Recommended first mapping from YOLO labels to product states:
@@ -85,8 +125,26 @@ src/kaoyan_agent/vision/focus_state_rules.py
 Prepare a YOLO dataset yaml, then run:
 
 ```powershell
-python scripts/train_focus_yolo.py --data path\to\data.yaml --epochs 50 --imgsz 640 --batch 8
+python scripts/train_focus_yolo.py --data d:\kaoyan_datasets\SCB-Dataset3-prepared\data.yaml --epochs 50 --imgsz 640 --batch 8
 ```
+
+For a quick smoke test before a full run:
+
+```powershell
+python scripts/train_focus_yolo.py `
+  --data d:\kaoyan_datasets\SCB-Dataset3-prepared\data.yaml `
+  --epochs 1 `
+  --imgsz 320 `
+  --batch 2 `
+  --fraction 0.02 `
+  --device cpu `
+  --workers 0 `
+  --name focus_state_smoke_clean
+```
+
+On Windows Anaconda environments, PyTorch/Ultralytics may load duplicate
+OpenMP runtimes. The training script sets `KMP_DUPLICATE_LIB_OK=TRUE` by
+default on Windows so local training can proceed.
 
 The expected model output is usually:
 

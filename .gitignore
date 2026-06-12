@@ -1,8 +1,11 @@
 .env
 .venv/
+.tmp/
+pytest-cache-files-*/
 __pycache__/
 *.py[cod]
 *.egg-info/
+yolov8n.pt
 data/*.db
 data/*.db-*
 data/*.log
