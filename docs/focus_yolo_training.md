@@ -152,10 +152,16 @@ The expected model output is usually:
 runs/focus_yolo/focus_state/weights/best.pt
 ```
 
+The first pilot model checked into this repository is:
+
+```text
+models/focus_state_v1_pilot/best.pt
+```
+
 Configure the app:
 
 ```text
-FOCUS_LOCAL_MODEL_PATH=runs/focus_yolo/focus_state/weights/best.pt
+FOCUS_LOCAL_MODEL_PATH=models/focus_state_v1_pilot/best.pt
 FOCUS_LOCAL_MODEL_CONFIDENCE=0.35
 ```
 
