@@ -1,164 +1,181 @@
-# Kaoyan Problem Discovery Agent
+## 任务C：规划类功能合集
 
-This project is a problem-discovery and adaptive-intervention agent for
-Chinese postgraduate entrance exam preparation.
+本模块提供考研备考的核心规划功能，包括**今日作战台（任务管理）**、**刷题复刷**、**上岸签/微行动**、**分数记录与趋势图**四大功能。
 
-The current implementation is V0.1.5: basic chat, DeepSeek/OpenAI-compatible
-LLM calls, SQLite conversation logging, chat session management, and scoped
-multi-turn context.
+---
 
-## Current Scope
+### 一、今日作战台（任务管理）
 
-- Streamlit chat UI
-- OpenAI-compatible LLM client
-- SQLite database initialization
-- Multiple chat sessions
-- Sidebar session creation and history switching
-- Conversation logging for user and assistant messages
-- LLM context limited to the current session's latest messages
-- `.env` based local LLM configuration
+#### 功能概述
+帮助用户规划每日学习内容，支持多来源任务创建、状态跟踪、优先级管理。
 
-Nightly memory update, Problem Board, long-term memory, file handling, and
-web search are planned for later versions and are not implemented in V0.1.5.
+#### 功能详情
 
-## Project Structure
+| 功能 | 描述 | 操作方式 |
+|------|------|----------|
+| 手动添加任务 | 用户自行创建学习任务 | 填写表单（标题、科目、时间、优先级）→ 点击创建 |
+| AI 生成任务 | 从问题板选择问题，AI 生成复习任务 | 问题板 → 选择问题 → 生成复习任务 |
+| 一键加入任务 | 上岸签或刷题复刷生成的任务可一键加入 | 点击"加入今日任务"按钮 |
+| 编辑任务 | 修改已创建的任务 | 选择任务 → 修改标题/科目/时间/优先级 → 保存 |
+| 删除任务 | 永久删除任务 | 选择任务 → 点击删除 → 确认 |
+| 更新状态 | 跟踪任务进度 | 选择任务 → 选择状态（待办/进行中/已完成/跳过/延期）→ 更新 |
+| 优先级管理 | 任务优先级高/中/低 | 创建或编辑时选择，列表中显示 |
+| 多维度排序 | 灵活查看任务 | 按优先级、时间升序、时间降序、科目排序 |
 
-```text
-.
-|-- app.py
-|-- config.py
-|-- db/
-|   |-- database.py
-|   `-- schema.sql
-|-- services/
-|   `-- llm_client.py
-|-- docs/
-|-- data/
-|   `-- app.db
-|-- .env.example
-|-- requirements.txt
-`-- README.md
-```
+#### 任务状态说明
 
-Future versions can add explicit modules such as `agents/`, `memory/`,
-`files/`, `prompts/`, and `tools/` without changing the V0.1.5 session layer.
+| 状态 | 含义 | 使用场景 |
+|------|------|----------|
+| 待办 | 任务已创建，尚未开始 | 默认状态 |
+| 进行中 | 正在执行的任务 | 点击"开始"或手动设置 |
+| 已完成 | 任务已完成 | 点击"完成"或手动设置 |
+| 跳过 | 本次计划不执行 | 任务不适用时 |
+| 延期 | 推迟到其他时间 | 时间不够时 |
 
-## Setup
+#### 技术实现
 
-Create and activate a virtual environment, then install dependencies:
+| 文件 | 职责 |
+|------|------|
+| `ui/components/task_panel.py` | 任务界面组件（添加、编辑、删除、排序） |
+| `repositories/study_tasks.py` | 任务数据 CRUD，支持 `review_priority` 字段 |
+| `workflows/workspace_workflow.py` | 任务数据聚合 |
+| `db/schema.sql` | `study_tasks` 表新增 `review_priority` 列 |
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
+---
 
-Create a local `.env` file from `.env.example`:
+### 二、刷题复刷
 
-```text
-LLM_API_KEY=your_api_key_here
-LLM_BASE_URL=https://api.deepseek.com/v1
-LLM_MODEL=deepseek-v4-flash
-```
+#### 功能概述
+用户输入错题或知识点，AI 生成复习提示（不生成具体题目，符合考研题源质量要求），用户提交理解后 AI 批改并记录结果。
 
-Do not commit real API keys.
+#### 为什么生成复习提示而不是具体题目？
+考研对题源质量要求高，系统不生成具体计算题，而是生成**概念检查、方法检查、易错提醒、公式回顾**等复习指引，引导用户自主思考和复习。
 
-## Run
+#### 完整流程
+用户输入问题 → AI 生成 1-3 条复习提示 → 用户选择提示练习 →用户写下理解/答案 → AI 批改 → 显示反馈和掌握度 → 记录结果
 
-```bash
-streamlit run app.py
-```
+#### 功能详情
 
-The app initializes SQLite automatically. The database file is created at:
+| 功能 | 描述 |
+|------|------|
+| **生成复习提示** | 输入问题描述、科目、章节，AI 生成 1-3 条复习提示 |
+| **提示类型** | concept_check（概念检查）、method_check（方法检查）、typical_mistake（易错提醒）、formula_recall（公式回顾） |
+| **从问题板选择** | 支持从问题板选择已发现的问题，一键生成复刷提示 |
+| **练习模式** | 选择某条提示进入练习，写下自己的理解或答案 |
+| **AI 批改** | 评估回答正确性（正确/部分正确/错误），给出具体反馈和思路提示 |
+| **掌握度评估** | AI 给出 0-100 的掌握度分数，帮助用户了解薄弱程度 |
+| **记录复刷结果** | 保存每次练习记录，支持按科目统计 |
+| **复刷统计** | 总练习次数、正确率、平均掌握度 |
 
-```text
-data/app.db
-```
+#### 技术实现
 
-## Database
+| 文件 | 职责 |
+|------|------|
+| `agents/review_generator.py` | 生成复习提示（调用 LLM） |
+| `agents/review_grader.py` | AI 批改用户答案 |
+| `repositories/review_attempts.py` | 保存复刷记录 |
+| `ui/components/review_panel.py` | 刷题复刷界面组件 |
+| `ui/review_page.py` | 刷题复刷页面入口 |
+| `workflows/planning.py` | 工作流编排 |
 
-V0.1.5 uses two tables:
+#### 数据库表：`review_attempts`
 
-```text
-chat_sessions
-- id
-- title
-- summary
-- created_at
-- updated_at
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER | 主键 |
+| subject | TEXT | 科目 |
+| topic | TEXT | 章节/专题 |
+| question | TEXT | 用户原始问题 |
+| hint_content | TEXT | 生成的复习提示 |
+| user_answer | TEXT | 用户的回答/理解 |
+| ai_feedback | TEXT | AI 批改反馈 |
+| is_correct | INTEGER | 0=错误, 1=正确, -1=部分正确 |
+| confidence | INTEGER | 用户自评掌握度 0-100 |
+| created_at | TEXT | 创建时间 |
 
-conversations
-- id
-- session_id
-- role
-- content
-- created_at
-```
+---
 
-Each message belongs to exactly one `chat_session`. The UI only displays the
-current session, and the LLM request only uses the current session's latest 20
-messages.
+### 三、上岸签 / 微行动
 
-## Verify Session Management
+#### 功能概述
+提供低门槛的学习激励和情绪支持，帮助用户在疲惫或焦虑时保持学习动力。
 
-1. Open the Streamlit page.
-2. Send a message in the default session.
-3. Click `新建对话` in the sidebar.
-4. Send a different message.
-5. Click the old session in the sidebar and confirm only its own messages show.
+#### 功能详情
 
-Check the saved sessions and messages:
+| 功能 | 描述 | 使用场景 |
+|------|------|----------|
+| **每日上岸签** | 抽签获得励志语句 + 今日行动建议 | 每天开始学习前，给自己一个积极的心理暗示 |
+| **随机小任务** | 生成 5-20 分钟可执行的小任务 | 不知道从哪开始时，先完成一个小任务 |
+| **安抚签** | 根据用户状态生成安抚语句 + 可选小任务 + 解压小游戏 | 感觉学不进去、累、焦虑时 |
 
-```bash
-python -c "import sqlite3; c=sqlite3.connect('data/app.db'); print(c.execute('select id, title, updated_at from chat_sessions order by updated_at desc').fetchall()); print(c.execute('select session_id, role, content from conversations order by id').fetchall())"
-```
+#### 安抚签详情
 
-## Verify Multi-Turn Context
+安抚签是本次新增的整合功能，包含三个层次：
 
-In one session, send:
+| 层次 | 内容 | 概率 |
+|------|------|------|
+| **安抚语句** | 温暖的鼓励话语，帮助缓解压力 | 100% |
+| **可选小任务** | 3-5 分钟的低门槛行动（如"站起来走走，喝口水"） | 30% |
+| **解压小游戏** | 呼吸练习、心情骰子、戳泡泡、每日肯定语 | 用户主动选择 |
 
-```text
-我叫小李，正在复习 408。
-```
+#### 解压小游戏说明
 
-Then send:
+| 游戏 | 操作 | 效果 |
+|------|------|------|
+| 呼吸练习 | 按提示吸气4秒 → 屏息7秒 → 呼气8秒 | 放松身心，缓解紧张 |
+| 心情骰子 | 点击抛骰子 | 随机获得心情emoji和鼓励语 |
+| 戳泡泡 | 点击泡泡戳破 | 简单解压，释放压力 |
+| 每日肯定语 | 点击获取肯定语 | 获得积极心理暗示 |
 
-```text
-我刚才说我在复习什么？
-```
+#### 技术实现
 
-The assistant should answer based on the same session context. Create a new
-session and ask the second question again; it should not know the previous
-session's content.
+| 文件 | 职责 |
+|------|------|
+| `agents/motivation.py` | 生成每日签、随机任务、安抚签（整合了安抚语句+小任务+小游戏入口） |
+| `ui/fortune_page.py` | 运势签页面（整合安抚签功能） |
+| `ui/components/minigames.py` | 解压小游戏组件 |
 
-## Existing Database Compatibility
+---
 
-If `data/app.db` was created by V0.1 and only has the old `conversations`
-table, V0.1.5 runs a simple migration during startup:
+### 四、分数记录与趋势图
 
-- creates `chat_sessions`
-- adds nullable `session_id` to the existing `conversations` table
-- creates one `历史对话` session
-- attaches old conversation rows to that session
+#### 功能概述
+记录模考成绩，提供可视化趋势图和 AI 分析建议，帮助用户跟踪学习效果。
 
-For early development, it is also acceptable to delete `data/app.db` and let
-the app recreate a fresh database:
+#### 完整流程
+录入成绩 → 查看成绩列表 → 查看折线图 → AI 分析趋势 →给出学习建议 → 查看成绩预测（需3次以上记录）
 
-```bash
-del data\app.db
-streamlit run app.py
-```
+#### 功能详情
 
-## Roadmap
+| 功能 | 描述 |
+|------|------|
+| **录入成绩** | 科目、分数、满分、考试类型、日期、备注 |
+| **成绩列表** | 表格展示历史成绩 |
+| **趋势图** | 折线图展示成绩变化趋势 |
+| **AI 趋势分析** | 判断趋势方向（上升/下降/平稳/波动），给出具体学习建议 |
+| **风险等级** | 低/中/高，提示紧急程度 |
+| **关注点** | AI 识别需要重点关注的方面 |
+| **成绩预测** | 基于历史成绩预测下次考试分数区间（需 ≥3 次记录） |
+| **最近成绩对比** | 最近3次成绩卡片对比 |
 
-Follow `docs/ROADMAP.md`.
 
-- V0.1: Basic chat and conversation logging
-- V0.1.5: Session management and scoped multi-turn context
-- V0.2: Nightly Memory Update MVP
-- V0.3: Problem Board UI
-- V0.4: Clarification Agent
-- V0.5: Plan Agent
-- V0.6: File Management
-- V0.7: Web Search
-- V0.8: Skills and self-evolution
+#### 技术实现
+
+| 文件 | 职责 |
+|------|------|
+| `agents/score_analyzer.py` | 分数趋势分析（调用 LLM） |
+| `agents/score_predictor.py` | 成绩预测（线性回归 + LLM） |
+| `ui/components/score_trend_panel.py` | 成绩趋势界面组件 |
+| `ui/score_trend_page.py` | 成绩趋势页面入口 |
+| `repositories/score.py` | 成绩数据 CRUD |
+| `workflows/planning.py` | 工作流编排 |
+
+---
+
+## 文件变更总览
+
+| 类型 | 数量 | 说明 |
+|------|------|------|
+| 新增文件 | 8个 | review_generator.py, review_grader.py, score_analyzer.py, score_predictor.py, review_attempts.py, review_panel.py, minigames.py, review_page.py |
+| 修改文件 | 10个 | motivation.py, planning.py, workspace_workflow.py, study_tasks.py, task_panel.py, score_trend_panel.py, fortune_page.py, schema.sql, database.py, app.py |
+| 数据库变更 | 2项 | study_tasks 新增 review_priority 列，新增 review_attempts 表 |
