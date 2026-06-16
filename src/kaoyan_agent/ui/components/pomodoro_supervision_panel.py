@@ -107,9 +107,24 @@ def render_auto_camera_sampler(
         )
     st.session_state.latest_supervision_recognition = recognition
     state_label = STATE_LABEL_ZH.get(recognition["state_type"], "无法判断")
-    st.success(f"自动记录：{state_label}，置信度 {recognition['confidence']:.2f}")
+    st.success(
+        f"自动记录：{state_label}，置信度 {recognition['confidence']:.2f}，"
+        f"专注度 {int(recognition.get('focus_score') or 0)}/100"
+    )
     if recognition.get("generation_error"):
         st.caption(f"AI 识别不可用，已按 unknown 记录：{recognition['generation_error']}")
+
+
+def render_focus_report_summary(report: dict) -> None:
+    st.subheader("最近督学报告")
+    metric_columns = st.columns(3)
+    metric_columns[0].metric("专注度", f"{int(report.get('focus_score') or 0)}/100")
+    metric_columns[1].metric("有效专注", f"{int(report.get('effective_focus_minutes') or 0)} 分钟")
+    metric_columns[2].metric("最长连续专注", f"{int(report.get('longest_focus_minutes') or 0)} 分钟")
+    st.write(f"专注质量：{report.get('focus_quality', '')}")
+    st.write(report.get("ai_summary", ""))
+    st.write(f"问题线索：{report.get('possible_problem_signal', '')}")
+    st.write(f"建议行动：{report.get('suggested_action', '')}")
 
 
 def render_pomodoro_supervision_panel() -> None:
@@ -139,13 +154,11 @@ def render_pomodoro_supervision_panel() -> None:
     current_id = st.session_state.get("current_supervision_session_id")
     if not current_id:
         latest_report = st.session_state.get("latest_supervision_report")
+        if not latest_report:
+            reports = workflow.list_focus_reports(limit=1)
+            latest_report = reports[0] if reports else None
         if latest_report:
-            st.subheader("最近督学报告")
-            st.write(f"专注质量：{latest_report.get('focus_quality', '')}")
-            st.write(f"有效专注：{latest_report.get('effective_focus_minutes', 0)} 分钟")
-            st.write(latest_report.get("ai_summary", ""))
-            st.write(f"问题线索：{latest_report.get('possible_problem_signal', '')}")
-            st.write(f"建议行动：{latest_report.get('suggested_action', '')}")
+            render_focus_report_summary(latest_report)
         st.info("开始后可记录中断、状态和完成情况。")
         return
 
@@ -175,6 +188,7 @@ def render_pomodoro_supervision_panel() -> None:
         st.write(
             f"最近识别：{state_label} / "
             f"{latest_recognition['confidence']:.2f} / "
+            f"专注度 {int(latest_recognition.get('focus_score') or 0)}/100 / "
             f"{latest_recognition['explanation']}"
         )
 

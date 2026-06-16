@@ -59,10 +59,12 @@ class FocusRepository:
         focus_session_id: int,
         state_type: str,
         confidence: float = 0.0,
+        focus_score: int = 0,
         explanation: str = "",
     ) -> int:
         if state_type not in {"focused", "away", "distracted", "blocked", "unknown"}:
             state_type = "unknown"
+        focus_score = max(0, min(100, int(focus_score or 0)))
         with closing(get_connection()) as connection:
             cursor = connection.execute(
                 """
@@ -70,12 +72,13 @@ class FocusRepository:
                     focus_session_id,
                     state_type,
                     confidence,
+                    focus_score,
                     explanation,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (focus_session_id, state_type, confidence, explanation, utc_now()),
+                (focus_session_id, state_type, confidence, focus_score, explanation, utc_now()),
             )
             connection.commit()
             return int(cursor.lastrowid)
@@ -113,6 +116,7 @@ class FocusRepository:
                     focus_session_id,
                     state_type,
                     confidence,
+                    focus_score,
                     explanation,
                     created_at
                 FROM focus_state_events
@@ -187,6 +191,7 @@ class FocusRepository:
                 """
                 INSERT INTO focus_reports (
                     focus_session_id,
+                    focus_score,
                     effective_focus_minutes,
                     away_count,
                     distracted_count,
@@ -199,10 +204,11 @@ class FocusRepository:
                     raw_result_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     focus_session_id,
+                    int(report.get("focus_score") or 0),
                     int(report.get("effective_focus_minutes") or 0),
                     int(report.get("away_count") or 0),
                     int(report.get("distracted_count") or 0),
@@ -226,6 +232,7 @@ class FocusRepository:
                 SELECT
                     id,
                     focus_session_id,
+                    focus_score,
                     effective_focus_minutes,
                     away_count,
                     distracted_count,
@@ -243,4 +250,31 @@ class FocusRepository:
                 (report_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def list_reports(self, limit: int = 10) -> List[Dict[str, Any]]:
+        with closing(get_connection()) as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id,
+                    focus_session_id,
+                    focus_score,
+                    effective_focus_minutes,
+                    away_count,
+                    distracted_count,
+                    blocked_count,
+                    longest_focus_minutes,
+                    focus_quality,
+                    ai_summary,
+                    possible_problem_signal,
+                    suggested_action,
+                    raw_result_json,
+                    created_at
+                FROM focus_reports
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return rows_to_dicts(rows)
 

@@ -43,13 +43,17 @@ class FocusWorkflow:
         focus_session_id: int,
         state_type: str,
         confidence: float = 0.0,
+        focus_score: int = 0,
         explanation: str = "",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> int:
+        if not focus_score:
+            focus_score = self.default_focus_score(state_type, confidence)
         event_id = self.focus_repository.record_state_event(
             focus_session_id=focus_session_id,
             state_type=state_type,
             confidence=confidence,
+            focus_score=focus_score,
             explanation=explanation,
         )
         session = self.focus_repository.get_session(focus_session_id) or {}
@@ -57,6 +61,7 @@ class FocusWorkflow:
             "focus_session_id": focus_session_id,
             "state_type": state_type,
             "confidence": confidence,
+            "focus_score": focus_score,
         }
         if metadata:
             event_metadata.update(metadata)
@@ -65,7 +70,8 @@ class FocusWorkflow:
             project_id=session.get("project_id") or self.project_id,
             content=(
                 f"Focus supervision state: {state_type}; "
-                f"confidence={confidence:.2f}; explanation={explanation}"
+                f"confidence={confidence:.2f}; "
+                f"focus_score={focus_score}; explanation={explanation}"
             ),
             role="system",
             source_type="focus_state_event",
@@ -90,6 +96,7 @@ class FocusWorkflow:
             focus_session_id=focus_session_id,
             state_type=recognition["state_type"],
             confidence=float(recognition["confidence"]),
+            focus_score=int(recognition.get("focus_score", 0)),
             explanation=recognition["explanation"],
             metadata={
                 "recognition_source": recognition.get("recognition_source", "multimodal"),
@@ -147,6 +154,7 @@ class FocusWorkflow:
             project_id=session.get("project_id") or self.project_id,
             content=(
                 "Focus supervision report: "
+                f"focus_score={report.get('focus_score', 0)}; "
                 f"quality={report.get('focus_quality', '')}; "
                 f"summary={report.get('ai_summary', '')}; "
                 f"problem_signal={report.get('possible_problem_signal', '')}; "
@@ -157,9 +165,23 @@ class FocusWorkflow:
             source_id=report_id,
             metadata={
                 "focus_session_id": focus_session_id,
+                "focus_score": report.get("focus_score", 0),
                 "focus_quality": report.get("focus_quality", ""),
             },
         )
 
     def get_focus_report(self, report_id: int) -> Optional[Dict[str, Any]]:
         return self.focus_repository.get_report(report_id)
+
+    def list_focus_reports(self, limit: int = 10):
+        return self.focus_repository.list_reports(limit=limit)
+
+    def default_focus_score(self, state_type: str, confidence: float) -> int:
+        confidence_score = round(max(0.0, min(1.0, float(confidence))) * 100)
+        if state_type == "focused":
+            return confidence_score
+        if state_type == "distracted":
+            return max(0, round((1.0 - float(confidence)) * 40))
+        if state_type in {"away", "blocked"}:
+            return 0
+        return max(0, round((1.0 - float(confidence)) * 20))

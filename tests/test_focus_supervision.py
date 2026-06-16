@@ -21,6 +21,7 @@ class FakeSupervisionAgent:
 
     def generate_report(self, session, state_events, timeline_events=None):
         return {
+            "focus_score": 92,
             "effective_focus_minutes": 20,
             "away_count": 0,
             "distracted_count": 0,
@@ -64,6 +65,7 @@ class FocusSupervisionAgentTest(unittest.TestCase):
         )
 
         self.assertEqual(report["effective_focus_minutes"], 10)
+        self.assertEqual(report["focus_score"], 50)
         self.assertEqual(report["away_count"], 1)
         self.assertEqual(report["distracted_count"], 1)
 
@@ -136,6 +138,7 @@ class FocusWorkflowTest(unittest.TestCase):
 
         self.assertEqual(recognition["state_type"], "focused")
         self.assertEqual(report["focus_quality"], "stable")
+        self.assertEqual(report["focus_score"], 92)
         self.assertEqual(
             [row["source_type"] for row in raw_events],
             ["focus_state_event", "focus_report"],

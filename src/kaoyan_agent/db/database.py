@@ -38,6 +38,7 @@ def init_db() -> None:
         migrate_v03_tables(connection)
         migrate_v04_tables(connection)
         migrate_v05_project_space(connection)
+        migrate_v06_focus_score(connection)
         connection.commit()
 
 
@@ -349,6 +350,13 @@ def migrate_v05_project_space(connection: sqlite3.Connection) -> None:
     connection.execute("CREATE INDEX IF NOT EXISTS idx_study_tasks_project_status ON study_tasks (project_id, status)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_score_records_project_subject_date ON score_records (project_id, subject, exam_date)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_score_analysis_reports_project_date ON score_analysis_reports (project_id, report_date)")
+
+
+def migrate_v06_focus_score(connection: sqlite3.Connection) -> None:
+    """Add numeric focus score fields for supervision state and report output."""
+
+    ensure_column(connection, "focus_state_events", "focus_score", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(connection, "focus_reports", "focus_score", "INTEGER NOT NULL DEFAULT 0")
 
 
 def rows_to_dicts(rows: List[sqlite3.Row]) -> List[Dict[str, Any]]:
