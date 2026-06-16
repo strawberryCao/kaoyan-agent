@@ -61,6 +61,13 @@ class WorkspaceWorkflow:
     def list_open_problems(self) -> list[dict[str, Any]]:
         return self.problem_repository.list_open()
 
+    def list_problems_by_statuses(
+        self,
+        statuses: list[str],
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return self.problem_repository.list_by_statuses(statuses, limit=limit)
+
     def update_problem_status(self, problem_id: int, status: str) -> bool:
         return self.problem_repository.update_status(problem_id, status)
 

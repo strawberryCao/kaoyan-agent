@@ -11,8 +11,10 @@ if str(SRC_DIR) not in sys.path:
 from kaoyan_agent.core.settings import get_settings
 from kaoyan_agent.db import init_db
 from kaoyan_agent.repositories.conversation_repository import ChatRepository
+from kaoyan_agent.ui.agent_trace_page import render_agent_trace_page
 from kaoyan_agent.ui.chat_page import render_chat_page
 from kaoyan_agent.ui.fortune_page import render_fortune_page
+from kaoyan_agent.ui.memory_system_page import render_memory_system_page
 from kaoyan_agent.ui.mistake_review_page import render_mistake_review_page
 from kaoyan_agent.ui.nightly_review_page import render_nightly_page
 from kaoyan_agent.ui.problem_board_page import render_problem_board_page
@@ -23,13 +25,16 @@ from kaoyan_agent.ui.task_page import render_task_page
 
 
 VIEW_LABELS = {
+    "chat": "聊天",
     "tasks": "今日任务 / 学习规划",
     "supervision": "督学模式",
-    "mistake_review": "错题复习",
+    "mistake_review": "错题复盘",
     "score_trend": "成绩趋势",
-    "nightly_review": "晚间回顾",
-    "problem_board": "问题板",
-    "fortune": "运势签",
+    "nightly_review": "Nightly Review",
+    "problem_board": "Problem Board",
+    "agent_trace": "执行轨迹",
+    "memory_system": "记忆系统",
+    "fortune": "Fortune Card",
     "settings": "设置",
 }
 
@@ -52,45 +57,50 @@ def render_nav_button(label: str, view: str) -> None:
 def render_sidebar(settings, chat_repository: ChatRepository) -> None:
     st.title("Kaoyan Agent")
 
-    if st.button("+ 新建对话", key="new_chat_session", use_container_width=True):
+    if st.button("+ 新建聊天", key="new_chat_session", use_container_width=True):
         session_id = chat_repository.create_session()
         st.session_state.current_chat_session_id = session_id
         st.session_state.current_main_view = "chat"
         st.rerun()
 
     st.divider()
-    st.subheader("常用功能")
-    render_nav_button("今日任务 / 学习规划", "tasks")
-    render_nav_button("督学模式", "supervision")
-    render_nav_button("错题复习", "mistake_review")
-    render_nav_button("成绩趋势", "score_trend")
+    st.subheader("主入口")
+    render_nav_button(VIEW_LABELS["chat"], "chat")
+    render_nav_button(VIEW_LABELS["tasks"], "tasks")
 
     st.divider()
-    st.subheader("最近会话")
-    sessions = chat_repository.list_sessions(limit=20)
-    if sessions:
-        for session in sessions:
-            label = session["title"] or chat_repository.default_session_title
-            if session["id"] == st.session_state.get("current_chat_session_id"):
-                label = f"* {label}"
-            if st.button(label, key=f"chat_session_{session['id']}", use_container_width=True):
-                st.session_state.current_chat_session_id = int(session["id"])
-                st.session_state.current_main_view = "chat"
-                st.rerun()
-    else:
-        st.caption("暂无会话")
+    st.subheader("学习干预")
+    render_nav_button(VIEW_LABELS["supervision"], "supervision")
+    render_nav_button(VIEW_LABELS["mistake_review"], "mistake_review")
+    render_nav_button(VIEW_LABELS["score_trend"], "score_trend")
 
     st.divider()
     st.subheader("Agent 诊断")
-    render_nav_button("晚间回顾", "nightly_review")
-    render_nav_button("问题板", "problem_board")
+    render_nav_button(VIEW_LABELS["agent_trace"], "agent_trace")
+    render_nav_button(VIEW_LABELS["memory_system"], "memory_system")
+    render_nav_button(VIEW_LABELS["problem_board"], "problem_board")
+    render_nav_button(VIEW_LABELS["nightly_review"], "nightly_review")
 
     st.divider()
-    st.subheader("轻量激励")
-    render_nav_button("运势签", "fortune")
+    st.subheader("辅助")
+    render_nav_button(VIEW_LABELS["fortune"], "fortune")
+    render_nav_button(VIEW_LABELS["settings"], "settings")
+
+    with st.expander("最近聊天", expanded=False):
+        sessions = chat_repository.list_sessions(limit=12)
+        if sessions:
+            for session in sessions:
+                label = session["title"] or chat_repository.default_session_title
+                if session["id"] == st.session_state.get("current_chat_session_id"):
+                    label = f"* {label}"
+                if st.button(label, key=f"chat_session_{session['id']}", use_container_width=True):
+                    st.session_state.current_chat_session_id = int(session["id"])
+                    st.session_state.current_main_view = "chat"
+                    st.rerun()
+        else:
+            st.caption("暂无聊天")
 
     st.divider()
-    render_nav_button("设置", "settings")
     st.caption(f"Model: {settings.llm_model}")
     st.caption(f"Database: {settings.database_path}")
 
@@ -118,6 +128,10 @@ def main() -> None:
         render_nightly_page(settings)
     elif current_view == "problem_board":
         render_problem_board_page()
+    elif current_view == "agent_trace":
+        render_agent_trace_page()
+    elif current_view == "memory_system":
+        render_memory_system_page()
     elif current_view == "fortune":
         render_fortune_page(settings)
     elif current_view == "settings":

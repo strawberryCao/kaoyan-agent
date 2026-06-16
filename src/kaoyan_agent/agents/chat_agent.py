@@ -26,7 +26,7 @@ class ChatAgent:
             return self.run_langchain_agent(request, messages, system_prompt)
         except Exception as exc:
             return AgentResponse(
-                text=f"LLM request failed: {exc}",
+                text="当前模型回复不可用，已保留你的问题作为原始证据。你可以稍后重试，或先使用侧边栏学习功能继续操作。",
                 raw_response="",
                 parse_status="llm_request_error",
                 errors=[str(exc)],

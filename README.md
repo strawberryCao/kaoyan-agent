@@ -175,3 +175,47 @@ References:
 - [LangChain structured output](https://docs.langchain.com/oss/python/langchain/structured-output)
 - [ChatDeepSeek integration](https://docs.langchain.com/oss/python/integrations/chat/deepseek)
 - [ChatOpenAI integration](https://docs.langchain.com/oss/python/integrations/chat/openai)
+
+## Embedding API Configuration
+
+Nightly memory gates can use a low-cost embedding API for small-scale SQLite
+cosine similarity. The default provider is SiliconFlow `BAAI/bge-m3`; OpenAI
+embeddings are not used by default.
+
+```powershell
+EMBEDDING_PROVIDER=siliconflow
+EMBEDDING_API_KEY=your_embedding_api_key_here
+EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+EMBEDDING_MODEL=BAAI/bge-m3
+EMBEDDING_BATCH_SIZE=16
+EMBEDDING_TIMEOUT_SECONDS=20
+```
+
+If the embedding key is missing or the request fails, the nightly workflow keeps
+running and falls back to lexical matching. Gate diagnostics record the
+embedding status and error.
+
+## Memory Backends
+
+SQLite is the primary store. Chroma stores memory/problem embeddings for
+semantic retrieval, and Neo4j stores graph relations for retrieval boosts and
+diagnostics.
+
+Start Neo4j locally:
+
+```powershell
+docker run --name kaoyan-neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/password neo4j:latest
+```
+
+Or use:
+
+```powershell
+docker compose -f docker-compose.neo4j.yml up -d
+```
+
+Then set `NEO4J_PASSWORD=password` in your local `.env`, run:
+
+```powershell
+python scripts/check_memory_backends.py
+python scripts/backfill_memory_indexes.py --all
+```

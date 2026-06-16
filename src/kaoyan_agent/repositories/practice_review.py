@@ -15,6 +15,14 @@ MASTERY_STATUSES = {"unmastered", "reviewing", "mastered"}
 
 
 class PracticeReviewRepository:
+    """Formal mistake-card repository.
+
+    The project still keeps the legacy ``practice_reviews`` table for practice
+    attempt feedback, but generated mistake cards use ``mistake_cards`` as the
+    single official mistake pool. ``MistakeReviewRepository`` is only an alias
+    to this repository so chat, UI, and workflows read/write the same table.
+    """
+
     def create_card(
         self,
         subject: str,

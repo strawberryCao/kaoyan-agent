@@ -96,6 +96,8 @@ class OnlineSessionResult:
     rewritten_query: str
     router_decision: RouterDecision
     retrieved_items: List[RetrievedItem] = field(default_factory=list)
+    action_result: Optional[Dict[str, Any]] = None
+    pending_action: Optional[Dict[str, Any]] = None
     agent_run_id: Optional[int] = None
     errors: List[str] = field(default_factory=list)
 
@@ -113,9 +115,14 @@ class NightlyWorkflowResult:
     raw_events_count: int
     inserted_problem_ids: List[int] = field(default_factory=list)
     inserted_memory_ids: List[int] = field(default_factory=list)
+    inserted_skill_ids: List[int] = field(default_factory=list)
     daily_memory_graph_id: Optional[int] = None
+    gate_results: List[Dict[str, Any]] = field(default_factory=list)
     error_message: str = ""
     result: Any = field(default_factory=dict)
+    validation_errors: List[Dict[str, Any]] = field(default_factory=list)
+    normalization_diagnostics: List[Dict[str, Any]] = field(default_factory=list)
+    candidate_results: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)

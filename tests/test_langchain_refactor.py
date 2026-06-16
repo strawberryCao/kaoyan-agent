@@ -1,7 +1,9 @@
 import builtins
 import json
+import re
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from pydantic import ValidationError
@@ -19,6 +21,7 @@ from kaoyan_agent.schemas.motivation import (
     SoothingTaskOutput,
 )
 from kaoyan_agent.schemas.nightly_memory import NightlyMemoryUpdateOutput
+from kaoyan_agent.schemas.nightly_memory import GraphEdge, GraphNode
 from kaoyan_agent.schemas.practice_review import PracticeReviewCard
 from kaoyan_agent.services.llm_client import LLMConfigError, create_langchain_model
 
@@ -44,6 +47,34 @@ def valid_nightly_payload() -> dict:
             }
         ],
     }
+
+
+def valid_nightly_payload_with_graph() -> dict:
+    payload = valid_nightly_payload()
+    payload["daily_memory_graph"] = {
+        "nodes": [
+            {
+                "node_id": "episode:1",
+                "node_type": "episode",
+                "title": "math plan interrupted",
+                "content": "The user reported that the math plan was interrupted.",
+                "ref_type": "",
+                "ref_id": None,
+                "metadata": {},
+            }
+        ],
+        "edges": [
+            {
+                "source": "raw_event:1",
+                "target": "episode:1",
+                "relation_type": "supports",
+                "weight": 1.0,
+                "metadata": {},
+            }
+        ],
+        "summary": "graph ok",
+    }
+    return payload
 
 
 class FakeLangChainAgent:
@@ -155,12 +186,14 @@ class LLMClientFactoryTest(unittest.TestCase):
 
 
 class NightlyMemoryLangChainTest(unittest.TestCase):
-    def test_nightly_memory_uses_structured_response(self):
+    def test_nightly_memory_defaults_to_json_text_completion(self):
         payload = valid_nightly_payload()
 
         def fake_create_agent(**kwargs):
-            self.assertIs(kwargs["response_format"], NightlyMemoryUpdateOutput)
-            return FakeLangChainAgent({"structured_response": payload})
+            self.assertNotIn("response_format", kwargs)
+            return FakeLangChainAgent(
+                {"messages": [FakeMessage(json.dumps(payload, ensure_ascii=False))]}
+            )
 
         with patch(
             "kaoyan_agent.services.llm_client.create_langchain_model",
@@ -178,32 +211,131 @@ class NightlyMemoryLangChainTest(unittest.TestCase):
         self.assertEqual(result.output.daily_summary, "ok")
         self.assertIn("daily_summary", result.raw_response)
 
-    def test_nightly_memory_missing_structured_response_fails(self):
-        with patch(
-            "kaoyan_agent.services.llm_client.create_langchain_model",
-            return_value=object(),
-        ), patch(
-            "kaoyan_agent.services.llm_client.create_agent",
-            return_value=FakeLangChainAgent({"messages": []}),
-        ):
-            result = NightlyMemoryAgent(Settings("key", None, "model")).run(
-                review_date="2026-06-06",
-                conversations=[],
-            )
-
-        self.assertEqual(result.parse_status, "failed")
-        self.assertIn("structured_response", result.error_message)
-
-    def test_nightly_memory_invalid_structured_response_fails(self):
+    def test_nightly_memory_optional_structured_response(self):
         payload = valid_nightly_payload()
-        payload["next_actions"][0]["priority"] = 9
+
+        def fake_create_agent(**kwargs):
+            self.assertIs(kwargs["response_format"], NightlyMemoryUpdateOutput)
+            return FakeLangChainAgent({"structured_response": payload})
 
         with patch(
             "kaoyan_agent.services.llm_client.create_langchain_model",
             return_value=object(),
         ), patch(
             "kaoyan_agent.services.llm_client.create_agent",
-            return_value=FakeLangChainAgent({"structured_response": payload}),
+            side_effect=fake_create_agent,
+        ):
+            result = NightlyMemoryAgent(
+                Settings("key", None, "model"),
+                prefer_structured_output=True,
+            ).run(
+                review_date="2026-06-06",
+                conversations=[],
+            )
+
+        self.assertEqual(result.parse_status, "success")
+
+    def test_nightly_memory_fallback_accepts_correct_daily_graph_fields(self):
+        payload = valid_nightly_payload_with_graph()
+
+        with patch(
+            "kaoyan_agent.services.llm_client.create_langchain_model",
+            return_value=object(),
+        ), patch(
+            "kaoyan_agent.services.llm_client.create_agent",
+            return_value=FakeLangChainAgent(
+                {"messages": [FakeMessage(json.dumps(payload, ensure_ascii=False))]}
+            ),
+        ):
+            result = NightlyMemoryAgent(Settings("key", None, "model")).run(
+                review_date="2026-06-06",
+                conversations=[],
+            )
+
+        self.assertEqual(result.parse_status, "success")
+        node = result.output.daily_memory_graph.nodes[0]
+        self.assertEqual(node.node_type, "episode")
+        self.assertEqual(node.title, "math plan interrupted")
+
+    def test_nightly_memory_fallback_normalizes_limited_graph_aliases(self):
+        payload = valid_nightly_payload()
+        payload["daily_memory_graph"] = {
+            "nodes": [
+                {
+                    "node_id": "episode:1",
+                    "type": "episode",
+                    "label": "math plan interrupted",
+                    "metadata": {},
+                }
+            ],
+            "edges": [
+                {
+                    "source": "raw_event:1",
+                    "target": "episode:1",
+                    "type": "supports",
+                }
+            ],
+            "summary": "graph ok",
+        }
+
+        with patch(
+            "kaoyan_agent.services.llm_client.create_langchain_model",
+            return_value=object(),
+        ), patch(
+            "kaoyan_agent.services.llm_client.create_agent",
+            return_value=FakeLangChainAgent(
+                {"messages": [FakeMessage(json.dumps(payload, ensure_ascii=False))]}
+            ),
+        ):
+            result = NightlyMemoryAgent(Settings("key", None, "model")).run(
+                review_date="2026-06-06",
+                conversations=[],
+            )
+
+        self.assertEqual(result.parse_status, "success")
+        node = result.output.daily_memory_graph.nodes[0]
+        edge = result.output.daily_memory_graph.edges[0]
+        self.assertEqual(node.node_type, "episode")
+        self.assertEqual(node.title, "math plan interrupted")
+        self.assertEqual(node.content, "math plan interrupted")
+        self.assertEqual(edge.relation_type, "supports")
+        self.assertEqual(result.normalization_diagnostics[0]["source_field"], "label")
+
+    def test_deepseek_response_format_unavailable_falls_back_to_json_text(self):
+        payload = valid_nightly_payload()
+
+        def fake_create_agent(**kwargs):
+            if kwargs.get("response_format") is NightlyMemoryUpdateOutput:
+                return FakeLangChainAgent(error=RuntimeError("response_format type is unavailable now"))
+            return FakeLangChainAgent(
+                {"messages": [FakeMessage(json.dumps(payload, ensure_ascii=False))]}
+            )
+
+        with patch(
+            "kaoyan_agent.services.llm_client.create_langchain_model",
+            return_value=object(),
+        ), patch(
+            "kaoyan_agent.services.llm_client.create_agent",
+            side_effect=fake_create_agent,
+        ):
+            result = NightlyMemoryAgent(
+                Settings("key", None, "deepseek-chat"),
+                prefer_structured_output=True,
+            ).run(
+                review_date="2026-06-06",
+                conversations=[],
+            )
+
+        self.assertEqual(result.parse_status, "success")
+        self.assertEqual(result.error_message, "")
+
+    def test_nightly_memory_fallback_invalid_json_fails_with_raw_response(self):
+        with patch(
+            "kaoyan_agent.services.llm_client.create_langchain_model",
+            return_value=object(),
+        ), patch(
+            "kaoyan_agent.services.llm_client.create_agent",
+            return_value=FakeLangChainAgent({"messages": [FakeMessage("{bad json}")]}),
         ):
             result = NightlyMemoryAgent(Settings("key", None, "model")).run(
                 review_date="2026-06-06",
@@ -211,8 +343,126 @@ class NightlyMemoryLangChainTest(unittest.TestCase):
             )
 
         self.assertEqual(result.parse_status, "failed")
-        self.assertFalse(hasattr(NightlyMemoryAgent, "run_raw_json_fallback"))
-        self.assertFalse(hasattr(NightlyMemoryAgent, "validate_response"))
+        self.assertEqual(result.raw_response, "{bad json}")
+        self.assertIn("JSON fallback validation failed", result.error_message)
+
+    def test_real_failure_sample_becomes_partial_success(self):
+        payload = valid_nightly_payload()
+        payload["daily_memory_graph"] = {
+            "nodes": [{"node_id": "episode:1", "label": "planner drift", "type": "episode"}],
+            "edges": [{"source": "raw_event:1", "target": "episode:1", "type": "supports"}],
+            "summary": "graph ok",
+        }
+        payload["discovered_problems"] = [
+            {
+                "operation": "skip",
+                "problem_type": "method_gap",
+                "subject": "",
+                "description": "问题已存在，没有新发现。",
+                "evidence": [],
+                "evidence_refs": [],
+                "root_cause": "",
+                "severity": 1,
+                "confidence": 0.0,
+                "value_score": 1,
+                "suggested_action": "",
+                "status": "open",
+                "merge_key": "",
+                "target_problem_id": None,
+                "reason": "重复问题",
+            }
+        ]
+        payload["memory_updates"] = [
+            {
+                "operation": "update",
+                "memory_type": "project_state",
+                "content": "用户正在调整记忆系统的 Nightly Review。",
+                "importance": 4,
+                "confidence": 0.8,
+                "merge_key": "memory:nightly-review-work",
+                "reason": "后续实现需要沿用该上下文。",
+                "status": "active",
+                "valid_from": "2026-06-14",
+                "subject": "记忆系统",
+                "evidence_refs": [{"source_type": "raw_event", "source_id": 1, "quote": "Nightly Review 失败", "note": ""}],
+                "target_memory_id": None,
+            }
+        ]
+        payload["skill_updates"] = [
+            {
+                "operation": "skip",
+                "skill_name": "",
+                "description": "",
+                "trigger": {},
+                "procedure": {},
+                "confidence": 0.0,
+                "effectiveness_score": 0.0,
+                "status": "active",
+                "evidence": [],
+                "evidence_refs": [],
+                "merge_key": "",
+                "target_skill_id": None,
+                "reason": "一次性建议，不是可复用流程",
+            }
+        ]
+
+        with patch(
+            "kaoyan_agent.services.llm_client.create_langchain_model",
+            return_value=object(),
+        ), patch(
+            "kaoyan_agent.services.llm_client.create_agent",
+            return_value=FakeLangChainAgent(
+                {"messages": [FakeMessage(json.dumps(payload, ensure_ascii=False))]}
+            ),
+        ):
+            result = NightlyMemoryAgent(Settings("key", None, "model")).run(
+                review_date="2026-06-14",
+                raw_events=[{"id": 1, "content": "Nightly Review 失败"}],
+            )
+
+        self.assertEqual(result.parse_status, "partial_success")
+        self.assertEqual(len(result.output.memory_updates), 1)
+        self.assertEqual(result.output.discovered_problems, [])
+        self.assertEqual(result.output.skill_updates, [])
+        self.assertEqual(result.output.daily_memory_graph.nodes[0].node_type, "episode")
+        self.assertEqual(
+            [item["skip_reason"] for item in result.candidate_results if item["validation_status"] == "skipped"],
+            ["operation_skip", "operation_skip"],
+        )
+
+
+class NightlyMemoryPromptContractTest(unittest.TestCase):
+    def test_daily_graph_prompt_examples_match_schema_fields(self):
+        prompt = Path("src/kaoyan_agent/prompts/nightly_memory_update_prompt.txt").read_text(
+            encoding="utf-8"
+        )
+        node_match = re.search(
+            r"Use exactly these node fields;.*?\n(\{.*?\})\n- edges should use",
+            prompt,
+            flags=re.DOTALL,
+        )
+        edge_match = re.search(
+            r"Use exactly these edge fields;.*?\n(\{.*?\})\n\n discovered_problems item:",
+            prompt,
+            flags=re.DOTALL,
+        )
+        if edge_match is None:
+            edge_match = re.search(
+                r"Use exactly these edge fields;.*?\n(\{.*?\})\n\ndiscovered_problems item:",
+                prompt,
+                flags=re.DOTALL,
+            )
+        self.assertIsNotNone(node_match)
+        self.assertIsNotNone(edge_match)
+
+        node_example = json.loads(node_match.group(1))
+        edge_example = json.loads(edge_match.group(1))
+
+        self.assertEqual(set(node_example), set(GraphNode.model_fields))
+        self.assertEqual(set(edge_example), set(GraphEdge.model_fields))
+        self.assertNotIn("label", node_example)
+        self.assertNotIn("type", node_example)
+        self.assertNotIn("type", edge_example)
 
 
 class PracticeReviewLangChainTest(unittest.TestCase):

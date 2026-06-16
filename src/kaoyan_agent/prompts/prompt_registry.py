@@ -33,7 +33,7 @@ DEFAULT_PROMPTS: Dict[str, str] = {
     "motivation.daily_sign": """
 请生成一张考研每日上岸签。只返回 JSON，不要 Markdown。
 字段：sign_level、sign_text、today_advice、action。
-sign_level 必须是 上上签/上吉/中吉/小吉/平签 之一。
+sign_level 必须是 top/good/steady/small/calm 之一。
 内容要轻量、有行动感，不要玄学化。
 """.strip(),
     "motivation.random_task": """
