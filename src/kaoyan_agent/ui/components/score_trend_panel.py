@@ -22,7 +22,10 @@ def render_score_trend_panel(settings: Settings) -> None:
         average = round(sum(scores) / len(scores), 1)
         col_latest, col_avg, col_count = st.columns(3)
         with col_latest:
-            render_metric_card("最近一次分数", f"{latest.get('score', 0)} / {latest.get('full_score', 100)}")
+            render_metric_card(
+                "最近一次分数",
+                f"{latest.get('score', 0)} / {latest.get('full_score', 100)}",
+            )
         with col_avg:
             render_metric_card("平均分", average)
         with col_count:
@@ -42,7 +45,9 @@ def render_score_trend_panel(settings: Settings) -> None:
         ]
         st.line_chart(chart_rows, x="考试日期", y="得分率")
     else:
-        render_empty_state("还没有成绩记录", "添加一次练习或模考成绩后，这里会显示趋势。")
+        render_empty_state(
+            "还没有成绩记录", "添加一次练习或模考成绩后，这里会显示趋势。"
+        )
 
     with st.expander("添加成绩记录", expanded=False):
         render_score_form(settings)
@@ -81,13 +86,15 @@ def render_score_form(settings: Settings) -> None:
 
 
 def render_score_record(record: dict) -> None:
-    st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="kaoyan-card-title">{record.get("subject") or "未指定科目"}：'
-        f'{record.get("score", 0)} / {record.get("full_score", 100)}</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(f"日期：{record.get('exam_date', '')} / 类型：{record.get('exam_type', '')}")
+    """使用 st.html 一次性渲染成绩卡片，替代多个 st.markdown 和 st.caption"""
+    # 构建完整的卡片 HTML
+    html = '<div class="kaoyan-card">'
+    html += f'<div class="kaoyan-card-title">{record.get("subject") or "未指定科目"}：{record.get("score", 0)} / {record.get("full_score", 100)}</div>'
+    # 模拟 st.caption 样式
+    html += f'<p style="font-size: 0.9rem; color: #888; margin: 4px 0;">日期：{record.get("exam_date", "")} / 类型：{record.get("exam_type", "")}</p>'
     if record.get("note"):
-        st.markdown(f"**备注：** {record.get('note')}")
-    st.markdown("</div>", unsafe_allow_html=True)
+        html += f'<p><strong>备注：</strong> {record.get("note")}</p>'
+    html += "</div>"  # 关闭卡片
+
+    # 一次性渲染所有 HTML
+    st.html(html)

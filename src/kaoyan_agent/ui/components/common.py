@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import html
 from typing import Any, Dict, Iterable
 
 import streamlit as st
-
 
 STATUS_LABELS = {
     "todo": "待开始",
@@ -64,8 +64,7 @@ MISTAKE_REASON_LABELS_ZH = {
 
 
 def inject_global_styles() -> None:
-    st.markdown(
-        """
+    st.html("""
         <style>
         :root {
             --kaoyan-primary: #9f1239;
@@ -140,9 +139,7 @@ def inject_global_styles() -> None:
             border-color: var(--kaoyan-primary);
         }
         </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    """)
 
 
 def install_card_styles() -> None:
@@ -150,13 +147,13 @@ def install_card_styles() -> None:
 
 
 def render_page_header(title: str, subtitle: str, badge: str | None = None) -> None:
-    badge_html = f'<span class="kaoyan-badge">{badge}</span>' if badge else ""
-    st.markdown(f"# {title} {badge_html}", unsafe_allow_html=True)
-    if subtitle:
-        st.markdown(
-            f'<div class="kaoyan-page-subtitle">{subtitle}</div>',
-            unsafe_allow_html=True,
-        )
+    badge_html = (
+        f'<span class="kaoyan-badge">{html.escape(badge)}</span>' if badge else ""
+    )
+    st.html(f"""
+        <h1>{html.escape(title)} {badge_html}</h1>
+        <div class="kaoyan-page-subtitle">{html.escape(subtitle)}</div>
+    """)
 
 
 def render_section_title(title: str, caption: str = "") -> None:
@@ -175,24 +172,33 @@ def render_card(
     footer: str | None = None,
     badge: str | None = None,
 ) -> None:
-    st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-    if badge:
-        st.markdown(f'<span class="kaoyan-badge">{badge}</span>', unsafe_allow_html=True)
-    st.markdown(f'<div class="kaoyan-card-title">{title}</div>', unsafe_allow_html=True)
-    if body:
-        st.markdown(body)
-    if footer:
-        st.markdown(f'<div class="kaoyan-card-footer">{footer}</div>', unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    escaped_title = html.escape(title)
+    escaped_body = html.escape(body) if body else ""
+    escaped_footer = html.escape(footer) if footer else ""
+    badge_html = (
+        f'<span class="kaoyan-badge">{html.escape(badge)}</span>' if badge else ""
+    )
+    st.html(f"""
+        <div class="kaoyan-card">
+            {badge_html}
+            <div class="kaoyan-card-title">{escaped_title}</div>
+            {f'<div>{escaped_body}</div>' if body else ''}
+            {f'<div class="kaoyan-card-footer">{escaped_footer}</div>' if footer else ''}
+        </div>
+    """)
 
 
 def render_metric_card(label: str, value: Any, helper: str | None = None) -> None:
-    st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-    st.caption(label)
-    st.markdown(f"### {value}")
-    if helper:
-        st.caption(helper)
-    st.markdown("</div>", unsafe_allow_html=True)
+    escaped_label = html.escape(label)
+    escaped_value = html.escape(str(value))
+    escaped_helper = html.escape(helper) if helper else ""
+    st.html(f"""
+        <div class="kaoyan-card">
+            <div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">{escaped_label}</div>
+            <div style="font-size:1.5rem;font-weight:600;margin:4px 0;">{escaped_value}</div>
+            {f'<div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">{escaped_helper}</div>' if helper else ''}
+        </div>
+    """)
 
 
 def source_label(source: str) -> str:
@@ -216,20 +222,28 @@ def render_task_card(task: Dict[str, Any], today: str = "") -> None:
     title = str(task.get("title") or task.get("display_title") or "未命名任务")
     subject = str(task.get("subject") or "未指定")
     minutes = int(task.get("minutes") or task.get("estimated_minutes") or 25)
-    status = str(task.get("status_label") or render_status_badge(str(task.get("status") or "todo")))
-    source = str(task.get("source_label") or source_label(str(task.get("source") or "manual")))
-    st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="kaoyan-card-title">{title}</div>', unsafe_allow_html=True)
-    st.markdown(
-        f'<span class="kaoyan-badge">{status}</span>'
-        f'<span class="kaoyan-badge">{subject}</span>'
-        f'<span class="kaoyan-badge">{minutes} 分钟</span>'
-        f'<span class="kaoyan-badge">{source}</span>',
-        unsafe_allow_html=True,
+    status = str(
+        task.get("status_label")
+        or render_status_badge(str(task.get("status") or "todo"))
     )
-    if today:
-        st.caption(f"日期：{today}")
-    st.markdown("</div>", unsafe_allow_html=True)
+    source = str(
+        task.get("source_label") or source_label(str(task.get("source") or "manual"))
+    )
+    escaped_title = html.escape(title)
+    escaped_subject = html.escape(subject)
+    escaped_status = html.escape(status)
+    escaped_source = html.escape(source)
+    escaped_today = html.escape(today) if today else ""
+    st.html(f"""
+        <div class="kaoyan-card">
+            <div class="kaoyan-card-title">{escaped_title}</div>
+            <span class="kaoyan-badge">{escaped_status}</span>
+            <span class="kaoyan-badge">{escaped_subject}</span>
+            <span class="kaoyan-badge">{minutes} 分钟</span>
+            <span class="kaoyan-badge">{escaped_source}</span>
+            {f'<div style="font-size:0.85rem;color:var(--kaoyan-text-muted);margin-top:6px;">日期：{escaped_today}</div>' if today else ''}
+        </div>
+    """)
 
 
 def render_debug_expander(debug: Any, title: str = "开发调试信息") -> None:
@@ -243,7 +257,9 @@ def render_json_debug_expander(title: str, payload: Any) -> None:
         st.json(payload)
 
 
-def render_empty_state(title: str, description: str, action_hint: str | None = None) -> None:
+def render_empty_state(
+    title: str, description: str, action_hint: str | None = None
+) -> None:
     body = description
     if action_hint:
         body = f"{description}\n\n{action_hint}"

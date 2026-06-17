@@ -1,3 +1,4 @@
+import html
 import streamlit as st
 
 from kaoyan_agent.core.settings import Settings
@@ -45,16 +46,27 @@ def render_memory_panel(settings: Settings) -> None:
 
 
 def render_memory_card(memory: dict) -> None:
-    st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-    st.markdown(f"**{memory.get('memory_type') or '记忆'}**")
-    st.markdown(str(memory.get("content") or ""))
-    st.caption(f"重要度：{memory.get('importance', 1)} / 置信度：{float(memory.get('confidence') or 0):.2f}")
-    st.markdown("</div>", unsafe_allow_html=True)
+    memory_type = html.escape(str(memory.get("memory_type") or "记忆"))
+    content = html.escape(str(memory.get("content") or ""))
+    importance = memory.get("importance", 1)
+    confidence = float(memory.get("confidence") or 0)
+    st.html(f"""
+        <div class="kaoyan-card">
+            <strong>{memory_type}</strong>
+            <div>{content}</div>
+            <div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">重要度：{importance} / 置信度：{confidence:.2f}</div>
+        </div>
+    """)
 
 
 def render_skill_card(skill: dict) -> None:
-    st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-    st.markdown(f"**{skill.get('skill_name') or '技能记忆'}**")
-    st.markdown(str(skill.get("description") or ""))
-    st.caption(f"置信度：{float(skill.get('confidence') or 0):.2f}")
-    st.markdown("</div>", unsafe_allow_html=True)
+    skill_name = html.escape(str(skill.get("skill_name") or "技能记忆"))
+    description = html.escape(str(skill.get("description") or ""))
+    confidence = float(skill.get("confidence") or 0)
+    st.html(f"""
+        <div class="kaoyan-card">
+            <strong>{skill_name}</strong>
+            <div>{description}</div>
+            <div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">置信度：{confidence:.2f}</div>
+        </div>
+    """)

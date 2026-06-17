@@ -1,3 +1,4 @@
+import html
 import streamlit as st
 
 from kaoyan_agent.core.settings import Settings
@@ -10,7 +11,6 @@ from kaoyan_agent.ui.components.common import (
 from kaoyan_agent.ui.view_models import to_review_card_view_model
 from kaoyan_agent.workflows.planning import PlanningWorkflow
 from kaoyan_agent.workflows.workspace_workflow import WorkspaceWorkflow
-
 
 MASTERY_STATUS_LABELS = {
     "unmastered": "未掌握",
@@ -34,8 +34,11 @@ def render_mistake_review_panel(settings: Settings) -> None:
 
 
 def render_generate_tab(settings: Settings) -> None:
-    render_section_title("生成错题卡", "只在有题目或错误证据时生成，避免沉淀低质量错题。")
+    render_section_title(
+        "生成错题卡", "只在有题目或错误证据时生成，避免沉淀低质量错题。"
+    )
     if hasattr(st, "dialog"):
+
         @st.dialog("生成错题卡")
         def generate_dialog() -> None:
             render_generate_form(settings)
@@ -51,7 +54,11 @@ def render_generate_tab(settings: Settings) -> None:
         render_review_card(card)
         render_json_debug_expander(
             "开发调试信息",
-            {"generation_error": card.get("generation_error")} if card.get("generation_error") else {},
+            (
+                {"generation_error": card.get("generation_error")}
+                if card.get("generation_error")
+                else {}
+            ),
         )
 
 
@@ -102,18 +109,26 @@ def render_review_queue(cards: list[dict], workspace: WorkspaceWorkflow) -> None
 
     with st.expander("更新掌握状态", expanded=False):
         card_options = {
-            f"{card.get('subject') or '未指定'} / {card.get('chapter') or '未指定'} / #{card['id']}": int(card["id"])
+            f"{card.get('subject') or '未指定'} / {card.get('chapter') or '未指定'} / #{card['id']}": int(
+                card["id"]
+            )
             for card in cards
         }
-        selected_card = st.selectbox("选择错题卡", list(card_options.keys()), key="mistake_card")
+        selected_card = st.selectbox(
+            "选择错题卡", list(card_options.keys()), key="mistake_card"
+        )
         selected_label = st.selectbox(
             "掌握状态",
             list(MASTERY_STATUS_LABELS.values()),
             key="mistake_status",
         )
-        status_by_label = {label: value for value, label in MASTERY_STATUS_LABELS.items()}
+        status_by_label = {
+            label: value for value, label in MASTERY_STATUS_LABELS.items()
+        }
         if st.button("更新掌握状态", key="mistake_update"):
-            workspace.update_mistake_status(card_options[selected_card], status_by_label[selected_label])
+            workspace.update_mistake_status(
+                card_options[selected_card], status_by_label[selected_label]
+            )
             st.success("掌握状态已更新。")
             st.rerun()
 
@@ -128,20 +143,40 @@ def render_review_queue(cards: list[dict], workspace: WorkspaceWorkflow) -> None
 
 def render_review_card(card: dict, compact: bool = False) -> None:
     vm = to_review_card_view_model(card)
-    st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-    title = f"{vm['subject']} / {vm['chapter']}"
-    st.markdown(f'<div class="kaoyan-card-title">{title}</div>', unsafe_allow_html=True)
+    # Escape all text fields
+    subject = html.escape(vm.get("subject", ""))
+    chapter = html.escape(vm.get("chapter", ""))
+    question = html.escape(vm.get("question", ""))
+    mistake_reason_label_esc = html.escape(vm.get("mistake_reason_label", ""))
+    priority_label_esc = html.escape(vm.get("priority_label", ""))
+    mastery_status_label_esc = html.escape(vm.get("mastery_status_label", ""))
+    knowledge_points = html.escape(vm.get("knowledge_points", ""))
+    analysis = html.escape(vm.get("analysis", ""))
+
+    # Build HTML
+    title = f"{subject} / {chapter}"
     if compact:
-        st.markdown(f"**题目/证据：** {shorten(vm['question'])}")
-        st.markdown(f"**错因：** {vm['mistake_reason_label']}")
-        st.markdown(f"**优先级：** {vm['priority_label']}")
-        st.markdown(f"**掌握状态：** {vm['mastery_status_label']}")
+        question_short = html.escape(shorten(vm.get("question", "")))
+        content = f"""
+        <div class="kaoyan-card">
+            <div class="kaoyan-card-title">{title}</div>
+            <div><strong>题目/证据：</strong> {question_short}</div>
+            <div><strong>错因：</strong> {mistake_reason_label_esc}</div>
+            <div><strong>优先级：</strong> {priority_label_esc}</div>
+            <div><strong>掌握状态：</strong> {mastery_status_label_esc}</div>
+        </div>
+        """
     else:
-        st.markdown(f"**知识点：** {vm['knowledge_points']}")
-        st.markdown(f"**错误原因：** {vm['mistake_reason_label']}")
-        st.markdown(f"**分析：** {vm['analysis']}")
-        st.markdown(f"**复习优先级：** {vm['priority_label']}")
-    st.markdown("</div>", unsafe_allow_html=True)
+        content = f"""
+        <div class="kaoyan-card">
+            <div class="kaoyan-card-title">{title}</div>
+            <div><strong>知识点：</strong> {knowledge_points}</div>
+            <div><strong>错误原因：</strong> {mistake_reason_label_esc}</div>
+            <div><strong>分析：</strong> {analysis}</div>
+            <div><strong>复习优先级：</strong> {priority_label_esc}</div>
+        </div>
+        """
+    st.html(content)
 
 
 def shorten(value: str, limit: int = 90) -> str:

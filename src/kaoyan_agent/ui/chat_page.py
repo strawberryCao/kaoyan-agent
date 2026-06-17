@@ -50,7 +50,9 @@ def render_chat_page(
         "你可以问学习问题，也可以明确说开始番茄钟、创建今日任务、生成错题卡。",
     )
     st.caption(
-        current_session["title"] if current_session else chat_repository.default_session_title
+        current_session["title"]
+        if current_session
+        else chat_repository.default_session_title
     )
 
     messages = chat_repository.list_messages(current_session_id, limit=50)
@@ -60,7 +62,9 @@ def render_chat_page(
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if message["role"] == "assistant":
-                render_pending_actions_for_message(settings, pending_repository, int(message["id"]))
+                render_pending_actions_for_message(
+                    settings, pending_repository, int(message["id"])
+                )
                 render_trace_for_message(trace_repository, int(message["id"]))
 
     prompt = st.chat_input("输入学习问题、复盘记录、计划变化或当前状态。")
@@ -78,7 +82,9 @@ def render_chat_page(
                 limit=20,
             )
         st.markdown(result.assistant_text)
-        render_pending_actions_for_message(settings, pending_repository, result.assistant_message_id)
+        render_pending_actions_for_message(
+            settings, pending_repository, result.assistant_message_id
+        )
         render_trace_for_message(trace_repository, result.assistant_message_id)
         if result.errors:
             st.caption("本次回复使用了备用处理。")
@@ -90,19 +96,19 @@ def render_quick_prompt_cards() -> None:
     with col_focus:
         render_card(
             "开始番茄钟",
-            "我想专注15分钟数学积分",
+            "我想专注 15 分钟学习数学积分",
             badge="专注",
         )
     with col_task:
         render_card(
             "创建任务",
-            "帮我创建一个15分钟操作系统任务",
+            "帮我创建一个 15 分钟操作系统任务",
             badge="计划",
         )
     with col_review:
         render_card(
             "先问题，再确认错题卡",
-            "sin2x积分我不会，原因是不会换元，科目数学，章节积分",
+            "积分我不会，原因是不会换元",
             badge="复盘",
         )
 
@@ -118,16 +124,23 @@ def render_pending_actions_for_message(
             continue
         payload = pending.get("payload") or {}
         st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-        st.markdown('<div class="kaoyan-card-title">建议保存为错题卡</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="kaoyan-card-title">建议保存为错题卡</div>',
+            unsafe_allow_html=True,
+        )
         st.markdown(
             f'<span class="kaoyan-badge">{render_status_badge(pending.get("status", ""))}</span>'
             f'<span class="kaoyan-badge">{payload.get("subject") or "未指定科目"}</span>'
             f'<span class="kaoyan-badge">{payload.get("chapter") or "未指定章节"}</span>',
             unsafe_allow_html=True,
         )
-        st.markdown(f"**题目摘要：** {payload.get('question_summary') or payload.get('question') or '未填写'}")
+        st.markdown(
+            f"**题目摘要：** {payload.get('question_summary') or payload.get('question') or '未填写'}"
+        )
         st.markdown(f"**错因线索：** {payload.get('user_reason') or '待确认'}")
-        st.markdown(f"**错因分类：** {mistake_reason_label(payload.get('mistake_reason', 'unknown'))}")
+        st.markdown(
+            f"**错因分类：** {mistake_reason_label(payload.get('mistake_reason', 'unknown'))}"
+        )
         st.markdown(f"**复习优先级：** {payload.get('review_priority') or 3}")
         status = str(pending.get("status") or "")
         if status == "pending_confirmation":

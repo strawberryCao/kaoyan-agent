@@ -9,7 +9,6 @@ from kaoyan_agent.ui.components.common import (
 from kaoyan_agent.ui.view_models import to_problem_view_model
 from kaoyan_agent.workflows.workspace_workflow import WorkspaceWorkflow
 
-
 PROBLEM_STATUS_LABELS = {
     "open": "打开",
     "watching": "观察中",
@@ -23,9 +22,13 @@ def render_problem_board_panel() -> None:
     install_card_styles()
     workspace = WorkspaceWorkflow()
     open_problems = workspace.list_problems_by_statuses(["open", "watching"], limit=100)
-    resolved_problems = workspace.list_problems_by_statuses(["resolved", "ignored", "archived"], limit=80)
+    resolved_problems = workspace.list_problems_by_statuses(
+        ["resolved", "ignored", "archived"], limit=80
+    )
 
-    high_severity = sum(1 for problem in open_problems if int(problem.get("severity") or 1) >= 4)
+    high_severity = sum(
+        1 for problem in open_problems if int(problem.get("severity") or 1) >= 4
+    )
     col_open, col_high, col_resolved = st.columns(3)
     with col_open:
         render_metric_card("开放问题", len(open_problems))
@@ -58,12 +61,18 @@ def render_problem_list(
             render_status_update_form(problems, workspace)
 
 
-def render_status_update_form(problems: list[dict], workspace: WorkspaceWorkflow) -> None:
+def render_status_update_form(
+    problems: list[dict], workspace: WorkspaceWorkflow
+) -> None:
     problem_options = {
-        f"{problem.get('description', '')[:36] or '未命名问题'} / #{problem['id']}": int(problem["id"])
+        f"{problem.get('description', '')[:36] or '未命名问题'} / #{problem['id']}": int(
+            problem["id"]
+        )
         for problem in problems
     }
-    selected_problem = st.selectbox("选择问题", list(problem_options.keys()), key="problem_select")
+    selected_problem = st.selectbox(
+        "选择问题", list(problem_options.keys()), key="problem_select"
+    )
     selected_label = st.selectbox(
         "问题状态",
         list(PROBLEM_STATUS_LABELS.values()),
@@ -71,32 +80,42 @@ def render_status_update_form(problems: list[dict], workspace: WorkspaceWorkflow
     )
     status_by_label = {label: value for value, label in PROBLEM_STATUS_LABELS.items()}
     if st.button("更新问题状态", key="problem_update"):
-        if workspace.update_problem_status(problem_options[selected_problem], status_by_label[selected_label]):
+        if workspace.update_problem_status(
+            problem_options[selected_problem], status_by_label[selected_label]
+        ):
             st.success("问题状态已更新。")
             st.rerun()
         st.warning("未找到该问题。")
 
 
 def render_problem_card(problem: dict) -> None:
+    """使用 st.html 一次性渲染问题卡片，避免多个 st.markdown 碎片。"""
     vm = to_problem_view_model(problem)
-    st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="kaoyan-card-title">{vm["description"]}</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
+
+    # 构建完整的卡片 HTML
+    html = '<div class="kaoyan-card">'
+    html += f'<div class="kaoyan-card-title">{vm["description"]}</div>'
+
+    # 状态标签区域
+    html += (
+        "<div>"
         f'<span class="kaoyan-badge">{vm["problem_type_label"]}</span>'
         f'<span class="kaoyan-badge">{vm["subject"]}</span>'
         f'<span class="kaoyan-badge">严重度 {vm["severity_label"]}</span>'
         f'<span class="kaoyan-badge">置信度 {vm["confidence_label"]}</span>'
-        f'<span class="kaoyan-badge">{vm["status_label"]}</span>',
-        unsafe_allow_html=True,
+        f'<span class="kaoyan-badge">{vm["status_label"]}</span>'
+        "</div>"
     )
+
     if vm["root_cause"]:
-        st.markdown(f"**可能根因：** {vm['root_cause']}")
+        html += f'<p><strong>可能根因：</strong>{vm["root_cause"]}</p>'
     if vm["suggested_action"]:
-        st.markdown(f"**建议行动：** {vm['suggested_action']}")
-    st.markdown("</div>", unsafe_allow_html=True)
+        html += f'<p><strong>建议行动：</strong>{vm["suggested_action"]}</p>'
+
+    html += "</div>"  # 关闭卡片
+
+    # 一次性渲染所有 HTML
+    st.html(html)
 
 
 def render_evidence_details(problems: list[dict]) -> None:

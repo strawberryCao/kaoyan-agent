@@ -36,7 +36,9 @@ def render_nightly_review_panel(settings: Settings) -> None:
             for review in latest:
                 render_review_history_card(review)
         else:
-            render_empty_state("还没有晚间回顾记录", "收集一天的对话和学习证据后，可以运行晚间回顾。")
+            render_empty_state(
+                "还没有晚间回顾记录", "收集一天的对话和学习证据后，可以运行晚间回顾。"
+            )
 
 
 def render_latest_result(result: dict) -> None:
@@ -44,7 +46,8 @@ def render_latest_result(result: dict) -> None:
     skipped = [
         item
         for item in gate_results
-        if item.get("operation") == "skip" or item.get("validation_status") in {"failed", "skipped"}
+        if item.get("operation") == "skip"
+        or item.get("validation_status") in {"failed", "skipped"}
     ]
 
     col_events, col_problems, col_memory, col_skipped = st.columns(4)
@@ -75,12 +78,16 @@ def render_latest_result(result: dict) -> None:
     if payload.get("daily_summary"):
         render_card("当天总结", payload["daily_summary"], badge="摘要")
 
-    render_candidate_cards("候选问题", payload.get("discovered_problems") or [], "description")
+    render_candidate_cards(
+        "候选问题", payload.get("discovered_problems") or [], "description"
+    )
     render_candidate_cards("候选记忆", payload.get("memory_updates") or [], "content")
     render_candidate_cards("候选技能", payload.get("skill_updates") or [], "skill_name")
 
     if gate_results:
-        operation_counts = Counter(str(item.get("operation") or "unknown") for item in gate_results)
+        operation_counts = Counter(
+            str(item.get("operation") or "unknown") for item in gate_results
+        )
         render_card(
             "Gate 结果",
             f"操作统计：{dict(operation_counts)}",

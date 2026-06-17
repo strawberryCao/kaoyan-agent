@@ -3,7 +3,6 @@ import sys
 
 import streamlit as st
 
-
 SRC_DIR = Path(__file__).resolve().parent / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -23,18 +22,17 @@ from kaoyan_agent.ui.settings_page import render_settings_page
 from kaoyan_agent.ui.supervision_page import render_supervision_page
 from kaoyan_agent.ui.task_page import render_task_page
 
-
 VIEW_LABELS = {
     "chat": "聊天",
-    "tasks": "今日任务 / 学习规划",
+    "tasks": "今日作战台",
     "supervision": "督学模式",
     "mistake_review": "错题复盘",
     "score_trend": "成绩趋势",
-    "nightly_review": "Nightly Review",
-    "problem_board": "Problem Board",
+    "nightly_review": "夜间复盘",
+    "problem_board": "问题看板",
     "agent_trace": "执行轨迹",
     "memory_system": "记忆系统",
-    "fortune": "Fortune Card",
+    "fortune": "幸运卡",
     "settings": "设置",
 }
 
@@ -56,6 +54,7 @@ def render_nav_button(label: str, view: str) -> None:
 
 def render_sidebar(settings, chat_repository: ChatRepository) -> None:
     st.title("Kaoyan Agent")
+    st.divider()
 
     if st.button("+ 新建聊天", key="new_chat_session", use_container_width=True):
         session_id = chat_repository.create_session()
@@ -63,10 +62,12 @@ def render_sidebar(settings, chat_repository: ChatRepository) -> None:
         st.session_state.current_main_view = "chat"
         st.rerun()
 
-    st.divider()
-    st.subheader("主入口")
+    # st.divider()
+    # st.subheader("主入口")
     render_nav_button(VIEW_LABELS["chat"], "chat")
     render_nav_button(VIEW_LABELS["tasks"], "tasks")
+    render_nav_button(VIEW_LABELS["fortune"], "fortune")
+    render_nav_button(VIEW_LABELS["settings"], "settings")
 
     st.divider()
     st.subheader("学习干预")
@@ -82,9 +83,9 @@ def render_sidebar(settings, chat_repository: ChatRepository) -> None:
     render_nav_button(VIEW_LABELS["nightly_review"], "nightly_review")
 
     st.divider()
-    st.subheader("辅助")
-    render_nav_button(VIEW_LABELS["fortune"], "fortune")
-    render_nav_button(VIEW_LABELS["settings"], "settings")
+    # st.subheader("更多")
+    # render_nav_button(VIEW_LABELS["fortune"], "fortune")
+    # render_nav_button(VIEW_LABELS["settings"], "settings")
 
     with st.expander("最近聊天", expanded=False):
         sessions = chat_repository.list_sessions(limit=12)
@@ -93,16 +94,17 @@ def render_sidebar(settings, chat_repository: ChatRepository) -> None:
                 label = session["title"] or chat_repository.default_session_title
                 if session["id"] == st.session_state.get("current_chat_session_id"):
                     label = f"* {label}"
-                if st.button(label, key=f"chat_session_{session['id']}", use_container_width=True):
+                if st.button(
+                    label, key=f"chat_session_{session['id']}", use_container_width=True
+                ):
                     st.session_state.current_chat_session_id = int(session["id"])
                     st.session_state.current_main_view = "chat"
                     st.rerun()
         else:
             st.caption("暂无聊天")
 
-    st.divider()
-    st.caption(f"Model: {settings.llm_model}")
-    st.caption(f"Database: {settings.database_path}")
+    # st.caption(f"模型：{settings.llm_model}")
+    # st.caption(f"数据库：{settings.database_path}")
 
 
 def main() -> None:
