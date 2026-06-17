@@ -176,6 +176,9 @@ class FocusWorkflow:
     def list_focus_reports(self, limit: int = 10):
         return self.focus_repository.list_reports(limit=limit)
 
+    def get_focus_session(self, focus_session_id: int) -> Optional[Dict[str, Any]]:
+        return self.focus_repository.get_session(focus_session_id)
+
     def default_focus_score(self, state_type: str, confidence: float) -> int:
         confidence_score = round(max(0.0, min(1.0, float(confidence))) * 100)
         if state_type == "focused":
