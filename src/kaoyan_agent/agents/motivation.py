@@ -14,6 +14,16 @@ from kaoyan_agent.services.llm_client import run_structured_agent
 
 
 SIGN_LEVELS = ["top", "good", "steady", "small", "calm"]
+SIGN_LEVEL_ALIASES = {
+    "上上签": "top",
+    "上吉": "good",
+    "上签": "good",
+    "中吉": "steady",
+    "中签": "steady",
+    "小吉": "small",
+    "奋斗签": "small",
+    "平签": "calm",
+}
 
 
 def int_between(value: Any, default: int, minimum: int, maximum: int) -> int:
@@ -150,6 +160,7 @@ class MotivationAgent:
         fallback: Dict[str, Any],
     ) -> Dict[str, Any]:
         level = str(sign.get("sign_level") or "").strip()
+        level = SIGN_LEVEL_ALIASES.get(level, level)
         if level not in SIGN_LEVELS:
             level = fallback["sign_level"]
         return {

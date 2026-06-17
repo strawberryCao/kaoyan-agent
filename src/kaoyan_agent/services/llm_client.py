@@ -1,9 +1,9 @@
+import base64
 from typing import Any, Dict, List, Optional, Type
 
 from pydantic import BaseModel
 
 from kaoyan_agent.core.settings import Settings, get_settings
-from langchain_deepseek import ChatDeepSeek
 from langchain.agents import create_agent
 
 
@@ -29,6 +29,7 @@ def create_langchain_model(
         raise LLMConfigError("LLM_API_KEY is missing. Create a .env file first.")
 
     try:
+        from langchain_deepseek import ChatDeepSeek
 
         kwargs: Dict[str, Any] = {
             "api_key": settings.llm_api_key,
@@ -143,6 +144,73 @@ def run_structured_agent(
     if structured_response is None:
         raise ValueError("LangChain structured_response is empty.")
     return response_format.model_validate(structured_response)
+
+
+def run_structured_vision_agent(
+    response_format: Type[BaseModel],
+    prompt: str,
+    image_bytes: bytes,
+    mime_type: str,
+    *,
+    system_prompt: str,
+    settings: Optional[Settings] = None,
+    temperature: float = 0.2,
+) -> BaseModel:
+    """Structured multimodal call for camera snapshots.
+
+    The image is passed as an in-memory data URL. Providers without multimodal
+    or structured-output support raise so callers can fall back safely.
+    """
+
+    settings = settings or get_settings()
+    if not supports_vision_model(settings):
+        raise LLMConfigError(f"Model does not support image_url vision messages: {settings.llm_model}")
+
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage
+    except ModuleNotFoundError as exc:
+        raise LLMConfigError(LANGCHAIN_MISSING_MESSAGE) from exc
+
+    llm = create_langchain_model(settings, temperature=temperature)
+    if not hasattr(llm, "with_structured_output"):
+        raise ValueError("Current LangChain model does not support structured output.")
+
+    encoded_image = base64.b64encode(image_bytes).decode("ascii")
+    data_url = f"data:{mime_type};base64,{encoded_image}"
+    structured_llm = llm.with_structured_output(response_format)
+    response = structured_llm.invoke(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ]
+            ),
+        ]
+    )
+    return response_format.model_validate(response)
+
+
+def supports_vision_model(settings: Optional[Settings] = None) -> bool:
+    settings = settings or get_settings()
+    model = (settings.llm_model or "").lower()
+    if not model:
+        return False
+    if "deepseek" in model:
+        return "vision" in model or "vl" in model
+    known_vision_markers = (
+        "gpt-4o",
+        "gpt-4.1",
+        "gpt-5",
+        "o3",
+        "o4",
+        "vision",
+        "vl",
+        "gemini",
+        "qwen-vl",
+    )
+    return any(marker in model for marker in known_vision_markers)
 
 
 def run_text_agent(

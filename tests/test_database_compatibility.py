@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +14,91 @@ from kaoyan_agent.repositories.project_repository import ProjectRepository
 
 
 class DatabaseCompatibilityTest(unittest.TestCase):
+    def test_init_db_upgrades_legacy_trace_tables_missing_new_columns(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "app.db"
+            settings = Settings("", None, "test-model", database_path=db_path)
+            with closing(sqlite3.connect(db_path)) as connection:
+                connection.execute(
+                    """
+                    CREATE TABLE agent_runs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        project_id INTEGER,
+                        agent_name TEXT NOT NULL DEFAULT '',
+                        workflow_name TEXT NOT NULL DEFAULT '',
+                        request_json TEXT NOT NULL DEFAULT '{}',
+                        response_json TEXT NOT NULL DEFAULT '{}',
+                        raw_response TEXT NOT NULL DEFAULT '',
+                        parse_status TEXT NOT NULL DEFAULT 'ok',
+                        error_message TEXT NOT NULL DEFAULT '',
+                        created_at TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE pending_actions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        pending_key TEXT NOT NULL DEFAULT '',
+                        action_type TEXT NOT NULL DEFAULT '',
+                        status TEXT NOT NULL DEFAULT 'pending_confirmation',
+                        payload_json TEXT NOT NULL DEFAULT '{}',
+                        created_at TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE agent_trace_steps (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        agent_run_id INTEGER NOT NULL,
+                        step_name TEXT NOT NULL DEFAULT '',
+                        status TEXT NOT NULL DEFAULT 'ok',
+                        started_at TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.commit()
+
+            with patch.object(database, "get_settings", return_value=settings):
+                database.init_db()
+                with closing(sqlite3.connect(db_path)) as connection:
+                    agent_run_columns = {
+                        row[1]
+                        for row in connection.execute("PRAGMA table_info(agent_runs)").fetchall()
+                    }
+                    trace_columns = {
+                        row[1]
+                        for row in connection.execute("PRAGMA table_info(agent_trace_steps)").fetchall()
+                    }
+                    pending_columns = {
+                        row[1]
+                        for row in connection.execute("PRAGMA table_info(pending_actions)").fetchall()
+                    }
+                    trace_indexes = {
+                        row[1]
+                        for row in connection.execute("PRAGMA index_list(agent_trace_steps)").fetchall()
+                    }
+                    pending_indexes = {
+                        row[1]
+                        for row in connection.execute("PRAGMA index_list(pending_actions)").fetchall()
+                    }
+                    run_indexes = {
+                        row[1]
+                        for row in connection.execute("PRAGMA index_list(agent_runs)").fetchall()
+                    }
+
+            self.assertIn("assistant_message_id", agent_run_columns)
+            self.assertIn("session_id", agent_run_columns)
+            self.assertIn("assistant_message_id", trace_columns)
+            self.assertIn("step_order", trace_columns)
+            self.assertIn("assistant_message_id", pending_columns)
+            self.assertIn("updated_at", pending_columns)
+            self.assertIn("idx_agent_trace_steps_run", trace_indexes)
+            self.assertIn("idx_pending_actions_message", pending_indexes)
+            self.assertIn("idx_pending_actions_session", pending_indexes)
+            self.assertIn("idx_agent_runs_assistant_message", run_indexes)
+
     def test_default_compatibility_record_exists(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "app.db"

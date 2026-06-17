@@ -38,6 +38,14 @@ def init_db() -> None:
         migrate_v03_tables(connection)
         migrate_v04_tables(connection)
         migrate_v05_project_space(connection)
+        migrate_v06_memory_system(connection)
+        migrate_v07_nightly_diagnostics(connection)
+        migrate_v08_feature_cde_compatibility(connection)
+        migrate_v09_online_actions_and_timer_state(connection)
+        migrate_v10_pending_actions_and_trace(connection)
+        migrate_v11_fix_trace_columns(connection)
+        migrate_v12_memory_backends(connection)
+        migrate_v13_nightly_memory_chain(connection)
         connection.commit()
 
 
@@ -349,6 +357,463 @@ def migrate_v05_project_space(connection: sqlite3.Connection) -> None:
     connection.execute("CREATE INDEX IF NOT EXISTS idx_study_tasks_project_status ON study_tasks (project_id, status)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_score_records_project_subject_date ON score_records (project_id, subject, exam_date)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_score_analysis_reports_project_date ON score_analysis_reports (project_id, report_date)")
+
+
+def migrate_v06_memory_system(connection: sqlite3.Connection) -> None:
+    """Add graph, embedding, and skill-operation compatibility columns."""
+
+    ensure_column(connection, "problem_board", "embedding_json", "TEXT NOT NULL DEFAULT '[]'")
+    ensure_column(connection, "nightly_reviews", "skill_updates_json", "TEXT NOT NULL DEFAULT '[]'")
+    ensure_column(connection, "nightly_reviews", "gate_results_json", "TEXT NOT NULL DEFAULT '[]'")
+    ensure_column(connection, "memories", "embedding_json", "TEXT NOT NULL DEFAULT '[]'")
+    ensure_column(connection, "global_memory_nodes", "embedding_json", "TEXT NOT NULL DEFAULT '[]'")
+
+    ensure_column(connection, "skill_memories", "review_id", "INTEGER")
+    ensure_column(connection, "skill_memories", "merge_key", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "skill_memories", "confidence", "REAL NOT NULL DEFAULT 0.0")
+    ensure_column(connection, "skill_memories", "embedding_json", "TEXT NOT NULL DEFAULT '[]'")
+    ensure_column(connection, "skill_memories", "last_used_at", "TEXT")
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS skill_operations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            review_id INTEGER,
+            skill_id INTEGER,
+            operation TEXT NOT NULL,
+            candidate_json TEXT NOT NULL DEFAULT '{}',
+            reason TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (review_id) REFERENCES nightly_reviews(id) ON DELETE SET NULL,
+            FOREIGN KEY (skill_id) REFERENCES skill_memories(id) ON DELETE SET NULL
+        )
+        """
+    )
+
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_skill_memories_status ON skill_memories (status, updated_at)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_skill_operations_review_id ON skill_operations (review_id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_problem_board_merge_key ON problem_board (merge_key)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_memories_merge_key ON memories (merge_key)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_skill_memories_merge_key ON skill_memories (merge_key)")
+
+
+def migrate_v07_nightly_diagnostics(connection: sqlite3.Connection) -> None:
+    """Add candidate-level validation diagnostics for Nightly Memory."""
+
+    ensure_column(connection, "nightly_reviews", "validation_errors_json", "TEXT NOT NULL DEFAULT '[]'")
+    ensure_column(
+        connection,
+        "nightly_reviews",
+        "normalization_diagnostics_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )
+    ensure_column(connection, "nightly_reviews", "candidate_results_json", "TEXT NOT NULL DEFAULT '[]'")
+
+
+def migrate_v08_feature_cde_compatibility(connection: sqlite3.Connection) -> None:
+    """Additive fields used by integrated C/D feature workflows."""
+
+    ensure_column(connection, "study_tasks", "reason", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "focus_sessions", "task_title", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "focus_sessions", "subject", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "focus_sessions", "actual_seconds", "INTEGER NOT NULL DEFAULT 0")
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_focus_sessions_started_at
+        ON focus_sessions (started_at)
+        """
+    )
+
+
+def migrate_v09_online_actions_and_timer_state(connection: sqlite3.Connection) -> None:
+    """Add online action idempotency and DB-backed timer state fields."""
+
+    ensure_column(connection, "focus_sessions", "timer_status", "TEXT NOT NULL DEFAULT 'ended'")
+    ensure_column(connection, "focus_sessions", "segment_started_at", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "focus_sessions", "accumulated_seconds", "INTEGER NOT NULL DEFAULT 0")
+    connection.execute(
+        """
+        UPDATE focus_sessions
+        SET timer_status = CASE
+            WHEN ended_at IS NULL AND completion_status = 'running' THEN 'running'
+            WHEN ended_at IS NULL AND completion_status = 'paused' THEN 'paused'
+            WHEN ended_at IS NULL AND completion_status = 'unknown' THEN 'running'
+            ELSE 'ended'
+        END
+        WHERE timer_status IS NULL OR timer_status = '' OR timer_status IN ('finished', 'ended')
+        """
+    )
+    connection.execute(
+        """
+        UPDATE focus_sessions
+        SET segment_started_at = COALESCE(segment_started_at, started_at)
+        WHERE timer_status = 'running'
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS online_action_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER,
+            session_id INTEGER,
+            user_event_id INTEGER,
+            action_key TEXT NOT NULL UNIQUE,
+            route TEXT NOT NULL DEFAULT '',
+            action_type TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT '',
+            result_json TEXT NOT NULL DEFAULT '{}',
+            error_message TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE SET NULL,
+            FOREIGN KEY (user_event_id) REFERENCES raw_events(id) ON DELETE SET NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_online_action_runs_key
+        ON online_action_runs (action_key)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_online_action_runs_session
+        ON online_action_runs (session_id, created_at)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_focus_sessions_timer_status
+        ON focus_sessions (timer_status, updated_at)
+        """
+    )
+
+
+def migrate_v10_pending_actions_and_trace(connection: sqlite3.Connection) -> None:
+    """Add persistent pending actions and per-step online execution traces."""
+
+    ensure_column(connection, "agent_runs", "session_id", "INTEGER")
+    ensure_column(connection, "agent_runs", "user_message_id", "INTEGER")
+    ensure_column(connection, "agent_runs", "user_event_id", "INTEGER")
+    ensure_column(connection, "agent_runs", "assistant_message_id", "INTEGER")
+    ensure_column(connection, "agent_runs", "duration_ms", "INTEGER NOT NULL DEFAULT 0")
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pending_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER,
+            session_id INTEGER,
+            user_event_id INTEGER,
+            assistant_message_id INTEGER,
+            pending_key TEXT NOT NULL UNIQUE,
+            action_type TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending_confirmation'
+                CHECK (status IN ('pending_confirmation', 'confirmed', 'dismissed', 'completed')),
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            result_json TEXT NOT NULL DEFAULT '{}',
+            created_target_id INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE SET NULL,
+            FOREIGN KEY (user_event_id) REFERENCES raw_events(id) ON DELETE SET NULL,
+            FOREIGN KEY (assistant_message_id) REFERENCES conversations(id) ON DELETE SET NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_trace_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_run_id INTEGER NOT NULL,
+            session_id INTEGER,
+            user_message_id INTEGER,
+            user_event_id INTEGER,
+            assistant_message_id INTEGER,
+            step_order INTEGER NOT NULL DEFAULT 0,
+            step_name TEXT NOT NULL DEFAULT '',
+            step_type TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'ok',
+            input_summary TEXT NOT NULL DEFAULT '',
+            output_summary TEXT NOT NULL DEFAULT '',
+            decision_summary TEXT NOT NULL DEFAULT '',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            error_message TEXT NOT NULL DEFAULT '',
+            started_at TEXT NOT NULL,
+            ended_at TEXT NOT NULL DEFAULT '',
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (agent_run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE SET NULL,
+            FOREIGN KEY (user_message_id) REFERENCES conversations(id) ON DELETE SET NULL,
+            FOREIGN KEY (user_event_id) REFERENCES raw_events(id) ON DELETE SET NULL,
+            FOREIGN KEY (assistant_message_id) REFERENCES conversations(id) ON DELETE SET NULL
+        )
+        """
+    )
+
+def migrate_v11_fix_trace_columns(connection: sqlite3.Connection) -> None:
+    """Backfill trace/pending columns before any dependent indexes are created."""
+
+    ensure_column(connection, "agent_runs", "session_id", "INTEGER")
+    ensure_column(connection, "agent_runs", "user_message_id", "INTEGER")
+    ensure_column(connection, "agent_runs", "user_event_id", "INTEGER")
+    ensure_column(connection, "agent_runs", "assistant_message_id", "INTEGER")
+    ensure_column(connection, "agent_runs", "duration_ms", "INTEGER NOT NULL DEFAULT 0")
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pending_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER,
+            session_id INTEGER,
+            user_event_id INTEGER,
+            assistant_message_id INTEGER,
+            pending_key TEXT NOT NULL UNIQUE,
+            action_type TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending_confirmation'
+                CHECK (status IN ('pending_confirmation', 'confirmed', 'dismissed', 'completed')),
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            result_json TEXT NOT NULL DEFAULT '{}',
+            created_target_id INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE SET NULL,
+            FOREIGN KEY (user_event_id) REFERENCES raw_events(id) ON DELETE SET NULL,
+            FOREIGN KEY (assistant_message_id) REFERENCES conversations(id) ON DELETE SET NULL
+        )
+        """
+    )
+    ensure_column(connection, "pending_actions", "project_id", "INTEGER")
+    ensure_column(connection, "pending_actions", "session_id", "INTEGER")
+    ensure_column(connection, "pending_actions", "user_event_id", "INTEGER")
+    ensure_column(connection, "pending_actions", "assistant_message_id", "INTEGER")
+    ensure_column(connection, "pending_actions", "pending_key", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "pending_actions", "action_type", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "pending_actions", "status", "TEXT NOT NULL DEFAULT 'pending_confirmation'")
+    ensure_column(connection, "pending_actions", "payload_json", "TEXT NOT NULL DEFAULT '{}'")
+    ensure_column(connection, "pending_actions", "result_json", "TEXT NOT NULL DEFAULT '{}'")
+    ensure_column(connection, "pending_actions", "created_target_id", "INTEGER")
+    ensure_column(connection, "pending_actions", "created_at", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "pending_actions", "updated_at", "TEXT NOT NULL DEFAULT ''")
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_trace_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_run_id INTEGER NOT NULL,
+            session_id INTEGER,
+            user_message_id INTEGER,
+            user_event_id INTEGER,
+            assistant_message_id INTEGER,
+            step_order INTEGER NOT NULL DEFAULT 0,
+            step_name TEXT NOT NULL DEFAULT '',
+            step_type TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'ok',
+            input_summary TEXT NOT NULL DEFAULT '',
+            output_summary TEXT NOT NULL DEFAULT '',
+            decision_summary TEXT NOT NULL DEFAULT '',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            error_message TEXT NOT NULL DEFAULT '',
+            started_at TEXT NOT NULL,
+            ended_at TEXT NOT NULL DEFAULT '',
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (agent_run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE SET NULL,
+            FOREIGN KEY (user_message_id) REFERENCES conversations(id) ON DELETE SET NULL,
+            FOREIGN KEY (user_event_id) REFERENCES raw_events(id) ON DELETE SET NULL,
+            FOREIGN KEY (assistant_message_id) REFERENCES conversations(id) ON DELETE SET NULL
+        )
+        """
+    )
+    ensure_column(connection, "agent_trace_steps", "agent_run_id", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(connection, "agent_trace_steps", "session_id", "INTEGER")
+    ensure_column(connection, "agent_trace_steps", "user_message_id", "INTEGER")
+    ensure_column(connection, "agent_trace_steps", "user_event_id", "INTEGER")
+    ensure_column(connection, "agent_trace_steps", "assistant_message_id", "INTEGER")
+    ensure_column(connection, "agent_trace_steps", "step_order", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(connection, "agent_trace_steps", "step_name", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "agent_trace_steps", "step_type", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "agent_trace_steps", "status", "TEXT NOT NULL DEFAULT 'ok'")
+    ensure_column(connection, "agent_trace_steps", "input_summary", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "agent_trace_steps", "output_summary", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "agent_trace_steps", "decision_summary", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "agent_trace_steps", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+    ensure_column(connection, "agent_trace_steps", "error_message", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "agent_trace_steps", "started_at", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "agent_trace_steps", "ended_at", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "agent_trace_steps", "duration_ms", "INTEGER NOT NULL DEFAULT 0")
+
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_agent_runs_assistant_message ON agent_runs (assistant_message_id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_agent_runs_session_created_at ON agent_runs (session_id, created_at)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_agent_trace_steps_run ON agent_trace_steps (agent_run_id, step_order)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_pending_actions_key ON pending_actions (pending_key)")
+    duplicate_pending_key = connection.execute(
+        """
+        SELECT pending_key
+        FROM pending_actions
+        WHERE pending_key IS NOT NULL AND pending_key != ''
+        GROUP BY pending_key
+        HAVING COUNT(*) > 1
+        LIMIT 1
+        """
+    ).fetchone()
+    if duplicate_pending_key is None:
+        connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_actions_key_unique
+            ON pending_actions (pending_key)
+            WHERE pending_key IS NOT NULL AND pending_key != ''
+            """
+        )
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_pending_actions_message ON pending_actions (assistant_message_id, status)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_pending_actions_session ON pending_actions (session_id, created_at)")
+
+
+def migrate_v12_memory_backends(connection: sqlite3.Connection) -> None:
+    """Add sqlite graph backend tables used beside SQLite and Chroma."""
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS graph_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_key TEXT NOT NULL UNIQUE,
+            node_type TEXT NOT NULL DEFAULT '',
+            ref_type TEXT NOT NULL DEFAULT '',
+            ref_id INTEGER,
+            title TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            embedding_json TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS graph_edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            edge_key TEXT NOT NULL UNIQUE,
+            source_node_key TEXT NOT NULL,
+            target_node_key TEXT NOT NULL,
+            relation_type TEXT NOT NULL DEFAULT '',
+            weight REAL NOT NULL DEFAULT 1.0,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_graph_nodes_type_ref ON graph_nodes (node_type, ref_type, ref_id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_graph_nodes_status_updated ON graph_nodes (status, updated_at)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges (source_node_key, relation_type)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges (target_node_key, relation_type)")
+
+
+def migrate_v13_nightly_memory_chain(connection: sqlite3.Connection) -> None:
+    """Add the formal Nightly Memory graph chain without rewriting old data."""
+
+    ensure_column(connection, "nightly_reviews", "index_sync_status_json", "TEXT NOT NULL DEFAULT '{}'")
+    ensure_column(connection, "nightly_reviews", "inserted_counts_json", "TEXT NOT NULL DEFAULT '{}'")
+    ensure_column(connection, "memories", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+    ensure_column(connection, "daily_memory_graphs", "node_count", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(connection, "daily_memory_graphs", "edge_count", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(connection, "daily_memory_graphs", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS daily_graph_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            daily_graph_id INTEGER NOT NULL,
+            node_key TEXT NOT NULL,
+            node_type TEXT NOT NULL DEFAULT '',
+            ref_type TEXT NOT NULL DEFAULT '',
+            ref_id INTEGER,
+            title TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            confidence REAL NOT NULL DEFAULT 0.0,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            FOREIGN KEY (daily_graph_id) REFERENCES daily_memory_graphs(id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS daily_graph_edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            daily_graph_id INTEGER NOT NULL,
+            source_node_key TEXT NOT NULL,
+            target_node_key TEXT NOT NULL,
+            relation_type TEXT NOT NULL DEFAULT '',
+            weight REAL NOT NULL DEFAULT 1.0,
+            evidence_json TEXT NOT NULL DEFAULT '[]',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            FOREIGN KEY (daily_graph_id) REFERENCES daily_memory_graphs(id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS global_graph_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_key TEXT NOT NULL UNIQUE,
+            node_type TEXT NOT NULL DEFAULT '',
+            ref_type TEXT NOT NULL DEFAULT '',
+            ref_id INTEGER,
+            title TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active',
+            confidence REAL NOT NULL DEFAULT 0.0,
+            updated_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS global_graph_edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            edge_key TEXT NOT NULL UNIQUE,
+            source_node_key TEXT NOT NULL,
+            target_node_key TEXT NOT NULL,
+            relation_type TEXT NOT NULL DEFAULT '',
+            weight REAL NOT NULL DEFAULT 1.0,
+            updated_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        UPDATE daily_memory_graphs
+        SET
+            node_count = CASE
+                WHEN node_count = 0 THEN json_array_length(COALESCE(nodes_json, '[]'))
+                ELSE node_count
+            END,
+            edge_count = CASE
+                WHEN edge_count = 0 THEN json_array_length(COALESCE(edges_json, '[]'))
+                ELSE edge_count
+            END
+        WHERE nodes_json IS NOT NULL OR edges_json IS NOT NULL
+        """
+    )
+
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_daily_graph_nodes_graph ON daily_graph_nodes (daily_graph_id, node_type)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_daily_graph_nodes_key ON daily_graph_nodes (node_key)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_daily_graph_edges_graph ON daily_graph_edges (daily_graph_id, relation_type)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_daily_graph_edges_source ON daily_graph_edges (source_node_key)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_daily_graph_edges_target ON daily_graph_edges (target_node_key)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_global_graph_nodes_key ON global_graph_nodes (node_key)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_global_graph_nodes_type_status ON global_graph_nodes (node_type, status)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_global_graph_edges_source ON global_graph_edges (source_node_key, relation_type)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_global_graph_edges_target ON global_graph_edges (target_node_key, relation_type)")
 
 
 def rows_to_dicts(rows: List[sqlite3.Row]) -> List[Dict[str, Any]]:

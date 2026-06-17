@@ -44,6 +44,7 @@ def valid_payload() -> dict:
                 "confidence": 0.75,
                 "merge_key": "math-planning-stability",
                 "reason": "会影响后续计划建议。",
+                "evidence_refs": [{"source_type": "raw_event", "source_id": 1, "quote": "用户反馈数学计划执行不稳。", "note": ""}],
             }
         ],
         "next_actions": [

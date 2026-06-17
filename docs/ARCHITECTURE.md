@@ -78,10 +78,13 @@ nightly_review_page
 -> NightlyMemoryAgent
 -> LangChain create_agent(response_format=NightlyMemoryUpdateOutput)
 -> response["structured_response"]
--> raw JSON fallback with NightlyMemoryUpdateOutput.model_validate_json()
 -> model_dump()
 -> nightly_review_repository
--> problem_repository / memory_repository / graphs / agent_runs
+-> daily_memory_graphs
+-> Memory Gate / Problem Gate / Skill Gate
+-> memory_repository / problem_repository / skill_memory_repository
+-> global_memory_nodes / global_memory_edges
+-> agent_runs
 -> SQLite
 ```
 
@@ -105,6 +108,24 @@ mistake_review_panel
 - Agents do not write SQLite. Database writes remain in workflows through repositories.
 - This version does not implement LangGraph. A future version can consider mapping `OnlineSessionWorkflow` to LangGraph StateGraph only if more complex state-graph orchestration is needed.
 
+## Embedding Boundary
+
+Embeddings are accessed through `kaoyan_agent.memory.embeddings.EmbeddingClient`.
+The default provider is SiliconFlow with model `BAAI/bge-m3` and an
+OpenAI-compatible `/embeddings` endpoint. Configure it with:
+
+```text
+EMBEDDING_PROVIDER=siliconflow
+EMBEDDING_API_KEY=...
+EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+EMBEDDING_MODEL=BAAI/bge-m3
+```
+
+The system does not require embeddings to succeed. Missing keys, HTTP errors,
+or malformed responses return empty vectors, and memory gates/retrieval fall
+back to lexical scoring. Gate results preserve `embedding_status` and
+`embedding_error` for diagnostics.
+
 ## Database Compatibility
 
 The SQLite database may still contain `projects` and `project_id` from earlier iterations. Keep them as compatibility fields for now. The current UI and docs do not treat them as product architecture.
@@ -122,3 +143,5 @@ Failure behavior:
 - save `error_message`
 - do not write `problem_board`
 - do not write `memories`
+- do not write `skill_memories`
+- do not write `daily_memory_graphs`

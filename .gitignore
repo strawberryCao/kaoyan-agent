@@ -1,8 +1,34 @@
 .env
+.streamlit/secrets.toml
 .venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
+
+# Runtime data and local indexes
 data/*.db
 data/*.db-*
 data/*.log
+data/chroma/
+data/neo4j/
+data/neo4j-logs/
+data/**/*.sqlite
+data/**/*.sqlite-*
+
+# Model artifacts: keep the formal demo YOLO weight, ignore other binaries.
+models/**/*.pt
+models/**/*.pth
+models/**/*.ckpt
+models/**/*.onnx
+models/**/*.engine
+!models/focus_state_v1_pilot/
+!models/focus_state_v1_pilot/best.pt
+weights/
+runs/
+
+# Local scratch files generated during integration/debugging.
+check_memory.py
+taskD_*.patch
+taskD_*.txt
+tree_*.txt
+目录树.txt

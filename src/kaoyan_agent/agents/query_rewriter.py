@@ -2,10 +2,11 @@
 
 
 class QueryRewriter:
-    """Lightweight MVP rewriter.
+    """Lightweight deterministic query rewriter.
 
     This keeps the original user message intact and only returns an internal
-    retrieval query. The first production upgrade can replace this with an LLM.
+    retrieval query. A later model-based rewriter can replace it behind the
+    same interface if routing quality requires it.
     """
 
     SHORT_REFERENCES = {"这个", "这里", "还是没懂", "刚才", "上面", "这个题"}
