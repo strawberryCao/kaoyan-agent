@@ -10,4 +10,6 @@ def render_problem_board_page() -> None:
         "系统持续追踪的学习问题、证据、根因和下一步干预。",
         badge="核心",
     )
-    render_problem_board_panel()
+
+    with st.spinner("加载问题看板..."):
+        render_problem_board_panel()

@@ -11,4 +11,6 @@ def render_task_page(settings: Settings) -> None:
         "今天只看最重要的任务、专注和问题提醒。",
         badge="主入口",
     )
-    render_task_panel(settings)
+
+    with st.spinner("加载今日任务..."):
+        render_task_panel(settings)

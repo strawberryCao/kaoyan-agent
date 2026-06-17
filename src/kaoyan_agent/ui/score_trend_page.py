@@ -10,4 +10,6 @@ def render_score_trend_page(settings: Settings) -> None:
         "成绩趋势",
         "用简洁趋势看见分数变化，而不是堆叠原始记录。",
     )
-    render_score_trend_panel(settings)
+
+    with st.spinner("加载成绩趋势..."):
+        render_score_trend_panel(settings)

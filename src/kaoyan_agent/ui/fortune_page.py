@@ -10,4 +10,6 @@ def render_fortune_page(settings: Settings) -> None:
         "幸运卡",
         "低压力启动工具：给你一个小行动，而不是一堆计划。",
     )
-    render_fortune_card(settings)
+
+    with st.spinner("加载幸运卡..."):
+        render_fortune_card(settings)

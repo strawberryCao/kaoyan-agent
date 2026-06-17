@@ -11,4 +11,6 @@ def render_supervision_page() -> None:
         "督学模式",
         "用番茄钟记录真实学习过程，必要时进行状态识别。",
     )
-    render_pomodoro_supervision_panel()
+
+    with st.spinner("加载督学面板..."):
+        render_pomodoro_supervision_panel()

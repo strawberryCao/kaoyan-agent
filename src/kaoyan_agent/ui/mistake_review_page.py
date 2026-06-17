@@ -10,4 +10,6 @@ def render_mistake_review_page(settings: Settings) -> None:
         "错题复盘",
         "不是收集错题，而是找出你反复卡住的原因。",
     )
-    render_mistake_review_panel(settings)
+
+    with st.spinner("加载错题复盘..."):
+        render_mistake_review_panel(settings)

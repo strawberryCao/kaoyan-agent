@@ -10,4 +10,6 @@ def render_nightly_page(settings: Settings) -> None:
         "晚间回顾",
         "把当天原始证据转成可验证的问题、记忆和下一步干预。",
     )
-    render_nightly_review_panel(settings)
+
+    with st.spinner("加载晚间回顾..."):
+        render_nightly_review_panel(settings)

@@ -29,20 +29,22 @@ def render_memory_system_page() -> None:
         "审计原始证据、长期记忆、问题看板、向量检索和图谱数据库落地状态。",
         badge="Agent 诊断",
     )
-    audit = MemoryBackendAudit().run()
-    tabs = st.tabs(["总览", "长期记忆", "向量检索", "图谱", "原始事件", "夜间回顾"])
-    with tabs[0]:
-        render_overview(audit)
-    with tabs[1]:
-        render_long_term_memories()
-    with tabs[2]:
-        render_vector_tab(audit)
-    with tabs[3]:
-        render_graph_tab(audit)
-    with tabs[4]:
-        render_raw_events_tab()
-    with tabs[5]:
-        render_nightly_tab()
+
+    with st.spinner("审计记忆系统..."):
+        audit = MemoryBackendAudit().run()
+        tabs = st.tabs(["总览", "长期记忆", "向量检索", "图谱", "原始事件", "夜间回顾"])
+        with tabs[0]:
+            render_overview(audit)
+        with tabs[1]:
+            render_long_term_memories()
+        with tabs[2]:
+            render_vector_tab(audit)
+        with tabs[3]:
+            render_graph_tab(audit)
+        with tabs[4]:
+            render_raw_events_tab()
+        with tabs[5]:
+            render_nightly_tab()
 
 
 def render_overview(audit: dict) -> None:

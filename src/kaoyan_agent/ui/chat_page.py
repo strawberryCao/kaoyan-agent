@@ -108,7 +108,7 @@ def render_quick_prompt_cards() -> None:
     with col_review:
         render_card(
             "先问题，再确认错题卡",
-            "积分我不会，原因是不会换元",
+            "sin(2x) 积分我不会，原因是不会换元",
             badge="复盘",
         )
 

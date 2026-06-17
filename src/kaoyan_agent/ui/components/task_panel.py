@@ -108,11 +108,13 @@ def render_today_tasks(
         return
 
     for task in task_vms:
-        # 卡片开标签
-        st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-
         # 合并静态内容（标题、标签）为单个 st.html
-        html = f'<div class="kaoyan-card-title">{task["title"]}</div>'
+        html = ""
+
+        # # 卡片开标签
+        # html += '<div class="kaoyan-card">'
+
+        html += f'<div class="kaoyan-card-title">{task["title"]}</div>'
         html += (
             "<div>"
             f'<span class="kaoyan-badge">{task["status_label"]}</span>'
@@ -121,6 +123,8 @@ def render_today_tasks(
             f'<span class="kaoyan-badge">{task["source_label"]}</span>'
             "</div>"
         )
+        # 卡片闭标签
+        # html += "</div>"
         st.html(html)
 
         # 交互按钮（保留原生组件）
@@ -144,8 +148,7 @@ def render_today_tasks(
             st.success("任务已标记完成。")
             st.rerun()
 
-        # 卡片闭标签
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.divider()
 
 
 def render_create_task_form(settings: Settings, today: str) -> None:

@@ -10,17 +10,18 @@ if str(SRC_DIR) not in sys.path:
 from kaoyan_agent.core.settings import get_settings
 from kaoyan_agent.db import init_db
 from kaoyan_agent.repositories.conversation_repository import ChatRepository
-from kaoyan_agent.ui.agent_trace_page import render_agent_trace_page
-from kaoyan_agent.ui.chat_page import render_chat_page
-from kaoyan_agent.ui.fortune_page import render_fortune_page
-from kaoyan_agent.ui.memory_system_page import render_memory_system_page
-from kaoyan_agent.ui.mistake_review_page import render_mistake_review_page
-from kaoyan_agent.ui.nightly_review_page import render_nightly_page
-from kaoyan_agent.ui.problem_board_page import render_problem_board_page
-from kaoyan_agent.ui.score_trend_page import render_score_trend_page
-from kaoyan_agent.ui.settings_page import render_settings_page
-from kaoyan_agent.ui.supervision_page import render_supervision_page
-from kaoyan_agent.ui.task_page import render_task_page
+
+# from kaoyan_agent.ui.agent_trace_page import render_agent_trace_page
+# from kaoyan_agent.ui.chat_page import render_chat_page
+# from kaoyan_agent.ui.fortune_page import render_fortune_page
+# from kaoyan_agent.ui.memory_system_page import render_memory_system_page
+# from kaoyan_agent.ui.mistake_review_page import render_mistake_review_page
+# from kaoyan_agent.ui.nightly_review_page import render_nightly_page
+# from kaoyan_agent.ui.problem_board_page import render_problem_board_page
+# from kaoyan_agent.ui.score_trend_page import render_score_trend_page
+# from kaoyan_agent.ui.settings_page import render_settings_page
+# from kaoyan_agent.ui.supervision_page import render_supervision_page
+# from kaoyan_agent.ui.task_page import render_task_page
 
 VIEW_LABELS = {
     "chat": "聊天",
@@ -107,6 +108,57 @@ def render_sidebar(settings, chat_repository: ChatRepository) -> None:
     # st.caption(f"数据库：{settings.database_path}")
 
 
+def render_view(view: str, settings) -> None:
+    """动态导入并渲染对应的页面"""
+    if view == "tasks":
+        from kaoyan_agent.ui.task_page import render_task_page
+
+        render_task_page(settings)
+    elif view == "supervision":
+        from kaoyan_agent.ui.supervision_page import render_supervision_page
+
+        render_supervision_page()
+    elif view == "mistake_review":
+        from kaoyan_agent.ui.mistake_review_page import render_mistake_review_page
+
+        render_mistake_review_page(settings)
+    elif view == "score_trend":
+        from kaoyan_agent.ui.score_trend_page import render_score_trend_page
+
+        render_score_trend_page(settings)
+    elif view == "nightly_review":
+        from kaoyan_agent.ui.nightly_review_page import render_nightly_page
+
+        render_nightly_page(settings)
+    elif view == "problem_board":
+        from kaoyan_agent.ui.problem_board_page import render_problem_board_page
+
+        render_problem_board_page()
+    elif view == "agent_trace":
+        from kaoyan_agent.ui.agent_trace_page import render_agent_trace_page
+
+        render_agent_trace_page()
+    elif view == "memory_system":
+        from kaoyan_agent.ui.memory_system_page import render_memory_system_page
+
+        render_memory_system_page()
+    elif view == "fortune":
+        from kaoyan_agent.ui.fortune_page import render_fortune_page
+
+        render_fortune_page(settings)
+    elif view == "settings":
+        from kaoyan_agent.ui.settings_page import render_settings_page
+
+        render_settings_page(settings)
+    else:  # chat
+        from kaoyan_agent.ui.chat_page import render_chat_page
+
+        render_chat_page(
+            settings=settings,
+            session_id=st.session_state.get("current_chat_session_id"),
+        )
+
+
 def main() -> None:
     st.set_page_config(page_title="Kaoyan Problem Discovery Agent", layout="wide")
     settings = get_settings()
@@ -119,26 +171,48 @@ def main() -> None:
 
     current_view = st.session_state.get("current_main_view", "chat")
     if current_view == "tasks":
+        from kaoyan_agent.ui.task_page import render_task_page
+
         render_task_page(settings)
     elif current_view == "supervision":
+        from kaoyan_agent.ui.supervision_page import render_supervision_page
+
         render_supervision_page()
     elif current_view == "mistake_review":
+        from kaoyan_agent.ui.mistake_review_page import render_mistake_review_page
+
         render_mistake_review_page(settings)
     elif current_view == "score_trend":
+        from kaoyan_agent.ui.score_trend_page import render_score_trend_page
+
         render_score_trend_page(settings)
     elif current_view == "nightly_review":
+        from kaoyan_agent.ui.nightly_review_page import render_nightly_page
+
         render_nightly_page(settings)
     elif current_view == "problem_board":
+        from kaoyan_agent.ui.problem_board_page import render_problem_board_page
+
         render_problem_board_page()
     elif current_view == "agent_trace":
+        from kaoyan_agent.ui.agent_trace_page import render_agent_trace_page
+
         render_agent_trace_page()
     elif current_view == "memory_system":
+        from kaoyan_agent.ui.memory_system_page import render_memory_system_page
+
         render_memory_system_page()
     elif current_view == "fortune":
+        from kaoyan_agent.ui.fortune_page import render_fortune_page
+
         render_fortune_page(settings)
     elif current_view == "settings":
+        from kaoyan_agent.ui.settings_page import render_settings_page
+
         render_settings_page(settings)
-    else:
+    else:  # chat
+        from kaoyan_agent.ui.chat_page import render_chat_page
+
         render_chat_page(
             settings=settings,
             session_id=st.session_state.get("current_chat_session_id"),
