@@ -62,7 +62,7 @@ def render_chat_page(
         render_quick_prompt_cards()
     for message in messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+            render_chat_markdown(message["content"])
             if message["role"] == "assistant":
                 render_pending_actions_for_message(
                     settings, pending_repository, int(message["id"])
@@ -74,7 +74,7 @@ def render_chat_page(
         return
 
     with st.chat_message("user"):
-        st.markdown(prompt)
+        render_chat_markdown(prompt)
 
     with st.chat_message("assistant"):
         with st.spinner("处理中..."):
@@ -83,7 +83,7 @@ def render_chat_page(
                 user_input=prompt,
                 limit=20,
             )
-        st.markdown(result.assistant_text)
+        render_chat_markdown(result.assistant_text)
         render_pending_actions_for_message(
             settings, pending_repository, result.assistant_message_id
         )
@@ -91,6 +91,24 @@ def render_chat_page(
         if result.errors:
             st.caption("本次回复使用了备用处理。")
             render_json_debug_expander("开发调试信息", {"errors": result.errors})
+
+
+def normalize_latex_delimiters(content: str) -> str:
+    """Convert common LLM LaTeX delimiters to Streamlit markdown math syntax."""
+
+    segments = str(content or "").split("```")
+    for index in range(0, len(segments), 2):
+        segment = segments[index]
+        segment = segment.replace("\\[", "\n$$\n")
+        segment = segment.replace("\\]", "\n$$\n")
+        segment = segment.replace("\\(", "$")
+        segment = segment.replace("\\)", "$")
+        segments[index] = segment
+    return "```".join(segments)
+
+
+def render_chat_markdown(content: str) -> None:
+    st.markdown(normalize_latex_delimiters(content))
 
 
 def render_quick_prompt_cards() -> None:
