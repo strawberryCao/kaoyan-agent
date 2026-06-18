@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -43,6 +44,28 @@ class AutoFocusFrameProcessor:
         self._lock = threading.Lock()
         self._latest_frame = None
         self._latest_frame_at = 0.0
+        self._last_recognition_at = 0.0
+        self._recognizing = False
+        self._latest_recognition = None
+        self._latest_error = ""
+        self._focus_session_id = 0
+        self._inference_interval_seconds = 1.0
+        self._workflow: Optional[FocusWorkflow] = None
+        self._recognizer: Optional[LocalYoloFocusRecognizer] = None
+
+    def configure(
+        self,
+        workflow: FocusWorkflow,
+        focus_session_id: int,
+        recognizer: LocalYoloFocusRecognizer,
+        inference_fps: int,
+    ) -> None:
+        with self._lock:
+            self._workflow = workflow
+            self._focus_session_id = int(focus_session_id)
+            self._recognizer = recognizer
+            fps = max(1, min(5, int(inference_fps or 1)))
+            self._inference_interval_seconds = 1.0 / fps
 
     def recv(self, frame):
         try:
@@ -50,14 +73,103 @@ class AutoFocusFrameProcessor:
         except Exception:
             frame_array = None
         if frame_array is not None:
+            inference_frame = self._resize_for_inference(frame_array)
             with self._lock:
-                self._latest_frame = frame_array
+                self._latest_frame = inference_frame
                 self._latest_frame_at = time.time()
+            self._maybe_start_recognition(inference_frame, self._latest_frame_at)
         return frame
 
     def latest_frame(self):
         with self._lock:
             return self._latest_frame, self._latest_frame_at
+
+    def latest_status(self) -> dict:
+        with self._lock:
+            return {
+                "latest_frame": self._latest_frame,
+                "latest_frame_at": self._latest_frame_at,
+                "last_recognition_at": self._last_recognition_at,
+                "recognizing": self._recognizing,
+                "latest_recognition": self._latest_recognition,
+                "latest_error": self._latest_error,
+                "interval_seconds": self._inference_interval_seconds,
+            }
+
+    def _maybe_start_recognition(self, frame_array, now: float) -> None:
+        with self._lock:
+            if not self._workflow or not self._recognizer or not self._focus_session_id:
+                return
+            if not self._recognizer.is_available() or self._recognizing:
+                return
+            if now - self._last_recognition_at < self._inference_interval_seconds:
+                return
+            self._recognizing = True
+            self._last_recognition_at = now
+            workflow = self._workflow
+            recognizer = self._recognizer
+            focus_session_id = self._focus_session_id
+
+        thread = threading.Thread(
+            target=self._recognize_frame,
+            args=(workflow, recognizer, focus_session_id, frame_array.copy()),
+            daemon=True,
+        )
+        thread.start()
+
+    def _recognize_frame(
+        self,
+        workflow: FocusWorkflow,
+        recognizer: LocalYoloFocusRecognizer,
+        focus_session_id: int,
+        frame_array,
+    ) -> None:
+        try:
+            result = recognizer.predict_frame(frame_array)
+            focus_score = workflow.default_focus_score(result.label, result.confidence)
+            record_result = workflow.record_focus_state(
+                focus_session_id=focus_session_id,
+                state_type=result.label,
+                confidence=result.confidence,
+                focus_score=focus_score,
+                explanation=f"本地 YOLO 识别：{result.label_text}",
+                metadata={"recognition_source": "local_yolo", "debug": result.debug},
+                force=False,
+                min_log_interval_seconds=10,
+            )
+            recognition = {
+                **result.to_dict(),
+                "focus_score": focus_score,
+                "record_result": record_result,
+                "recognized_at": time.strftime("%H:%M:%S"),
+            }
+            with self._lock:
+                self._latest_recognition = recognition
+                self._latest_error = ""
+        except Exception as exc:
+            with self._lock:
+                self._latest_error = str(exc)
+        finally:
+            with self._lock:
+                self._recognizing = False
+
+    @staticmethod
+    def _resize_for_inference(frame_array):
+        try:
+            height, width = frame_array.shape[:2]
+            max_side = max(height, width)
+            if max_side <= 640:
+                return frame_array
+            import cv2
+
+            scale = 640 / max_side
+            return cv2.resize(
+                frame_array,
+                (max(1, int(width * scale)), max(1, int(height * scale))),
+                interpolation=cv2.INTER_AREA,
+            )
+        except Exception:
+            return frame_array
 
 
 def fragment_compat(run_every: str):
@@ -114,64 +226,70 @@ def select_yolo_weights_path(settings: Settings) -> tuple[str, list[str]]:
     return selected, candidate_values
 
 
-@fragment_compat(run_every="200ms")
 def render_auto_camera_sampler(
     workflow: FocusWorkflow,
     focus_session_id: int,
     recognizer: LocalYoloFocusRecognizer,
     inference_fps: int,
-) -> None:
+):
     try:
         from streamlit_webrtc import WebRtcMode, webrtc_streamer
     except ModuleNotFoundError:
         st.warning("streamlit-webrtc 未安装，无法打开浏览器摄像头。")
-        return
+        return None
 
     st.caption("摄像头画面只进入本地 YOLO 推理，不发送给 DeepSeek。")
     context = webrtc_streamer(
         key=f"supervision_yolo_camera_{focus_session_id}",
-        mode=WebRtcMode.SENDONLY,
+        mode=WebRtcMode.SENDRECV,
         media_stream_constraints={"video": True, "audio": False},
         video_processor_factory=AutoFocusFrameProcessor,
         async_processing=True,
     )
     if not context.video_processor:
         st.info("等待浏览器摄像头授权或视频帧输入。")
+        return context
+
+    context.video_processor.configure(
+        workflow=workflow,
+        focus_session_id=focus_session_id,
+        recognizer=recognizer,
+        inference_fps=inference_fps,
+    )
+    return context
+
+
+@fragment_compat(run_every="2s")
+def render_auto_camera_status(context) -> None:
+    if not context or not context.video_processor:
         return
 
-    frame, frame_at = context.video_processor.latest_frame()
-    if frame is None:
+    status = context.video_processor.latest_status()
+    latest_frame = status.get("latest_frame")
+    if latest_frame is not None:
+        st.session_state.latest_supervision_frame = latest_frame
+
+    if not status.get("latest_frame_at"):
         st.info("摄像头已请求开启，但还没有收到视频帧。请确认浏览器已授权摄像头。")
         return
 
-    st.session_state.latest_supervision_frame = frame
-    min_interval = 1.0 / max(1, min(5, int(inference_fps or 1)))
-    now = time.time()
-    last_sample_key = f"supervision_last_yolo_sample_at_{focus_session_id}"
-    last_frame_key = f"supervision_last_yolo_frame_at_{focus_session_id}"
-    last_sample_at = float(st.session_state.get(last_sample_key, 0.0))
-    last_frame_at = float(st.session_state.get(last_frame_key, 0.0))
-    if now - last_sample_at < min_interval or frame_at <= last_frame_at:
-        st.caption("本地 YOLO 识别运行中。")
-        return
+    recognition = status.get("latest_recognition")
+    if recognition:
+        st.session_state.latest_supervision_recognition = recognition
+        st.caption(
+            f"本地 YOLO 自动识别：{recognition.get('label_text') or LABEL_TEXT['unknown']} / "
+            f"置信度 {float(recognition.get('confidence') or 0.0):.2f} / "
+            f"专注度 {int(recognition.get('focus_score') or 0)}/100 / "
+            f"{recognition.get('recognized_at') or ''}"
+        )
+    elif status.get("recognizing"):
+        with st.spinner("本地 YOLO 正在识别学习状态..."):
+            st.empty()
+    else:
+        st.caption("摄像头已开启，等待下一帧进入本地 YOLO 识别。")
 
-    st.session_state[last_sample_key] = now
-    st.session_state[last_frame_key] = frame_at
-    result = recognizer.predict_frame(frame)
-    record_result = workflow.record_focus_state(
-        focus_session_id=focus_session_id,
-        state_type=result.label,
-        confidence=result.confidence,
-        explanation=f"本地 YOLO 识别：{result.label_text}",
-        metadata={"recognition_source": "local_yolo", "debug": result.debug},
-        force=False,
-        min_log_interval_seconds=10,
-    )
-    st.session_state.latest_supervision_recognition = {
-        **result.to_dict(),
-        "record_result": record_result,
-        "recognized_at": time.strftime("%H:%M:%S"),
-    }
+    if status.get("latest_error"):
+        st.caption(f"本地 YOLO 识别暂不可用：{status['latest_error']}")
 
 
 def render_pomodoro_supervision_panel() -> None:
@@ -199,6 +317,9 @@ def render_pomodoro_supervision_panel() -> None:
         render_yolo_diagnostics(settings)
     with tab_report:
         latest_report = st.session_state.get("latest_supervision_report")
+        if not latest_report:
+            reports = workflow.list_focus_reports(limit=1)
+            latest_report = reports[0] if reports else None
         if latest_report:
             render_focus_report(latest_report)
         else:
@@ -224,12 +345,7 @@ def render_timer_card(
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    elapsed_seconds = workflow.get_elapsed_seconds(timer_state)
-    remaining_seconds = workflow.get_remaining_seconds(timer_state)
-    col_elapsed, col_remaining, col_pauses = st.columns(3)
-    col_elapsed.metric("已专注", format_duration(elapsed_seconds))
-    col_remaining.metric("剩余", format_duration(remaining_seconds))
-    col_pauses.metric("暂停", timer_state.pause_count)
+    render_live_focus_timer(timer_state.model_dump())
     st.caption(
         f"状态：{render_status_badge(timer_state.status.value)} / "
         f"任务：{timer_state.task_title or '临时专注任务'}"
@@ -296,12 +412,12 @@ def render_start_controls(workflow: FocusWorkflow) -> None:
 
 def render_vision_supervision_card(workflow: FocusWorkflow, current_id, settings: Settings) -> None:
     selected_weights, _ = select_yolo_weights_path(settings)
-    recognizer = get_cached_recognizer(
-        selected_weights,
-        settings.yolo_focus_confidence_threshold,
-        settings.yolo_focus_camera_id,
-    )
-    camera_diagnostic = get_camera_diagnostic(settings.yolo_focus_camera_id)
+    with st.spinner("加载本地 YOLO 模型..."):
+        recognizer = get_cached_recognizer(
+            selected_weights,
+            settings.yolo_focus_confidence_threshold,
+            settings.yolo_focus_camera_id,
+        )
     latest = st.session_state.get("latest_supervision_recognition") or {}
 
     st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
@@ -314,9 +430,10 @@ def render_vision_supervision_card(workflow: FocusWorkflow, current_id, settings
         unsafe_allow_html=True,
     )
     st.caption(f"权重路径：{selected_weights or '未找到 .pt'}")
-    col_label, col_conf = st.columns(2)
+    col_label, col_conf, col_score = st.columns(3)
     col_label.metric("当前识别", latest.get("label_text") or LABEL_TEXT["unknown"])
     col_conf.metric("置信度", f"{float(latest.get('confidence') or 0.0):.2f}")
+    col_score.metric("专注度", f"{int(latest.get('focus_score') or 0)}/100")
     st.caption(f"最近识别：{latest.get('recognized_at') or '暂无'}")
 
     camera_enabled = st.toggle("开启摄像头督学", value=False, key="supervision_camera_enabled")
@@ -325,12 +442,13 @@ def render_vision_supervision_card(workflow: FocusWorkflow, current_id, settings
     elif camera_enabled and not available:
         st.warning(recognizer.status_message() or "本地 YOLO 不可用。")
     elif camera_enabled:
-        render_auto_camera_sampler(
+        camera_context = render_auto_camera_sampler(
             workflow=workflow,
             focus_session_id=int(current_id),
             recognizer=recognizer,
             inference_fps=settings.yolo_focus_inference_fps,
         )
+        render_auto_camera_status(camera_context)
 
     latest_frame = st.session_state.get("latest_supervision_frame")
     if latest_frame is not None:
@@ -338,13 +456,18 @@ def render_vision_supervision_card(workflow: FocusWorkflow, current_id, settings
     else:
         st.caption("最近帧：暂无")
 
-    if camera_enabled and not camera_diagnostic.get("can_open"):
+    camera_diagnostic = st.session_state.get("latest_supervision_camera_diagnostic") or {}
+    if st.button("检查本机摄像头", key="supervision_camera_diagnostic"):
+        with st.spinner("检查本机摄像头状态..."):
+            camera_diagnostic = get_camera_diagnostic(settings.yolo_focus_camera_id)
+            st.session_state.latest_supervision_camera_diagnostic = camera_diagnostic
+    if camera_diagnostic and not camera_diagnostic.get("can_open"):
         st.info(camera_diagnostic.get("error") or "摄像头无法打开。浏览器摄像头仍可能需要单独授权。")
     render_json_debug_expander(
         "最近错误 / YOLO 诊断",
         {
             "recognizer": recognizer.debug,
-            "camera": camera_diagnostic,
+            "camera": camera_diagnostic or {"status": "not_checked"},
             "latest": latest,
         },
     )
@@ -425,6 +548,7 @@ def render_state_timeline(workflow: FocusWorkflow, focus_session_id: int) -> Non
 def render_focus_report(report: dict) -> None:
     render_section_title("最近督学报告")
     st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
+    st.markdown(f"**专注度：** {int(report.get('focus_score') or 0)}/100")
     st.markdown(f"**专注质量：** {report.get('focus_quality', '')}")
     st.markdown(f"**有效专注：** {report.get('effective_focus_minutes', 0)} 分钟")
     st.markdown(f"**总结：** {report.get('ai_summary', '')}")
@@ -440,6 +564,40 @@ def format_duration(seconds: int) -> str:
     if hours:
         return f"{hours:02d}:{minutes:02d}:{remaining_seconds:02d}"
     return f"{minutes:02d}:{remaining_seconds:02d}"
+
+
+def parse_iso_datetime(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def timer_elapsed_seconds_from_state(timer_state: FocusTimerState) -> int:
+    elapsed = int(timer_state.accumulated_seconds or 0)
+    if timer_state.status != FocusTimerStatus.RUNNING:
+        return max(0, elapsed)
+    segment_started_at = parse_iso_datetime(str(timer_state.segment_started_at or ""))
+    if not segment_started_at:
+        return max(0, elapsed)
+    now = datetime.now(segment_started_at.tzinfo or timezone.utc)
+    return max(0, elapsed + int((now - segment_started_at).total_seconds()))
+
+
+@fragment_compat(run_every="1s")
+def render_live_focus_timer(timer_state_payload: dict) -> None:
+    timer_state = FocusTimerState.model_validate(timer_state_payload)
+    elapsed_seconds = timer_elapsed_seconds_from_state(timer_state)
+    remaining_seconds = max(timer_state.planned_minutes * 60 - elapsed_seconds, 0)
+    col_elapsed, col_remaining, col_pauses = st.columns(3)
+    col_elapsed.metric("已专注", format_duration(elapsed_seconds))
+    col_remaining.metric("剩余", format_duration(remaining_seconds))
+    col_pauses.metric("暂停", timer_state.pause_count)
 
 
 def render_focus_stats(workflow: FocusWorkflow) -> None:

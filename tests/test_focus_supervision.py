@@ -29,6 +29,7 @@ class FakeSupervisionAgent:
 
     def generate_report(self, session, state_events, timeline_events=None):
         return {
+            "focus_score": 92,
             "effective_focus_minutes": 20,
             "away_count": 0,
             "distracted_count": 0,
@@ -57,6 +58,7 @@ class FocusSupervisionAgentTest(unittest.TestCase):
 
         self.assertEqual(result["state_type"], "unknown")
         self.assertEqual(result["confidence"], 1.0)
+        self.assertEqual(result["focus_score"], 0)
         self.assertEqual(result["explanation"], "fallback")
 
     def test_fallback_report_counts_supervision_states(self):
@@ -72,6 +74,7 @@ class FocusSupervisionAgentTest(unittest.TestCase):
         )
 
         self.assertEqual(report["effective_focus_minutes"], 10)
+        self.assertEqual(report["focus_score"], 50)
         self.assertEqual(report["away_count"], 1)
         self.assertEqual(report["distracted_count"], 1)
 
@@ -136,7 +139,9 @@ class FocusWorkflowTest(unittest.TestCase):
                     ).fetchall()
 
         self.assertEqual(recognition["state_type"], "focused")
+        self.assertEqual(recognition["focus_score"], 91)
         self.assertEqual(report["focus_quality"], "stable")
+        self.assertEqual(report["focus_score"], 92)
         self.assertEqual(
             [row["source_type"] for row in raw_events],
             ["focus_state_event", "focus_report"],
@@ -258,6 +263,7 @@ class FocusSupervisionUITest(unittest.TestCase):
         self.assertIn("AutoFocusFrameProcessor", source)
         self.assertIn("webrtc_streamer", source)
         self.assertIn("render_auto_camera_sampler", source)
+        self.assertIn("render_auto_camera_status", source)
         self.assertIn("find_yolo_weight_candidates", source)
         self.assertIn("latest_supervision_frame", source)
         self.assertIn("最近错误 / YOLO 诊断", source)

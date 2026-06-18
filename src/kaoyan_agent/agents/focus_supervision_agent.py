@@ -46,6 +46,7 @@ class FocusSupervisionAgent:
         fallback = {
             "state_type": "unknown",
             "confidence": 0.0,
+            "focus_score": 0,
             "explanation": "当前视觉识别不可用，已切换为手动状态记录。",
             "recognition_source": "manual_fallback",
         }
@@ -138,6 +139,12 @@ class FocusSupervisionAgent:
                 recognition.get("explanation") or fallback["explanation"]
             ).strip(),
         }
+        normalized["focus_score"] = self.clamp_int(
+            recognition.get("focus_score"),
+            self.default_focus_score(state_type, normalized["confidence"]),
+            0,
+            100,
+        )
         if recognition.get("recognition_source"):
             normalized["recognition_source"] = str(recognition["recognition_source"])
         if recognition.get("metrics") is not None:
@@ -155,6 +162,8 @@ class FocusSupervisionAgent:
             f"Session: {session}\n"
             f"State events: {state_events}\n"
             f"Timeline events: {timeline_events}\n"
+            "Include focus_score as an integer from 0 to 100, where 100 means "
+            "highly focused and 0 means no usable focus evidence.\n"
             "Connect patterns to possible learning problems, for example startup "
             "difficulty, oversized plan, unclear next action, or execution drift."
         )
@@ -172,6 +181,7 @@ class FocusSupervisionAgent:
         away = counts.get("away", 0)
         distracted = counts.get("distracted", 0)
         blocked = counts.get("blocked", 0)
+        focus_score = self.session_focus_score(state_events)
         effective = actual if total == 0 else round(actual * focused / total)
 
         if total == 0:
@@ -194,6 +204,7 @@ class FocusSupervisionAgent:
             possible_signal = "Actual focus time was lower than planned; task size may be too large."
 
         return {
+            "focus_score": focus_score,
             "effective_focus_minutes": max(0, effective),
             "away_count": away,
             "distracted_count": distracted,
@@ -214,6 +225,12 @@ class FocusSupervisionAgent:
         fallback: Dict[str, Any],
     ) -> Dict[str, Any]:
         return {
+            "focus_score": self.clamp_int(
+                report.get("focus_score"),
+                fallback.get("focus_score", 0),
+                0,
+                100,
+            ),
             "effective_focus_minutes": self.safe_int(
                 report.get("effective_focus_minutes"),
                 fallback["effective_focus_minutes"],
@@ -244,11 +261,52 @@ class FocusSupervisionAgent:
             ).strip(),
         }
 
+    def default_focus_score(self, state_type: str, confidence: float) -> int:
+        confidence_score = round(max(0.0, min(1.0, confidence)) * 100)
+        if state_type == "focused":
+            return confidence_score
+        if state_type == "distracted":
+            return max(0, round((1.0 - confidence) * 40))
+        if state_type in {"away", "blocked"}:
+            return 0
+        return max(0, round((1.0 - confidence) * 20))
+
+    def session_focus_score(self, state_events: List[Dict[str, Any]]) -> int:
+        if not state_events:
+            return 0
+
+        scores = []
+        for event in state_events:
+            if event.get("focus_score") is not None:
+                scores.append(self.clamp_int(event.get("focus_score"), 0, 0, 100))
+                continue
+            state_type = str(event.get("state_type") or "unknown")
+            default_confidence = (
+                1.0 if state_type in {"focused", "distracted", "away", "blocked"} else 0.0
+            )
+            confidence = self.clamp_float(event.get("confidence"), default_confidence, 0.0, 1.0)
+            scores.append(self.default_focus_score(state_type, confidence))
+
+        return round(sum(scores) / max(len(scores), 1))
+
     def safe_int(self, value: Any, default: int = 0) -> int:
         try:
             return max(0, int(value))
         except (TypeError, ValueError):
             return max(0, default)
+
+    def clamp_int(
+        self,
+        value: Any,
+        default: int,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        try:
+            number = int(round(float(value)))
+        except (TypeError, ValueError):
+            number = int(default)
+        return max(minimum, min(maximum, number))
 
     def clamp_float(
         self,

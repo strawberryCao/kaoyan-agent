@@ -12,6 +12,7 @@
     migrate_v11_fix_trace_columns,
     migrate_v12_memory_backends,
     migrate_v13_nightly_memory_chain,
+    migrate_v14_focus_scores,
 )
 
 __all__ = [
@@ -28,5 +29,6 @@ __all__ = [
     "migrate_v11_fix_trace_columns",
     "migrate_v12_memory_backends",
     "migrate_v13_nightly_memory_chain",
+    "migrate_v14_focus_scores",
 ]
 

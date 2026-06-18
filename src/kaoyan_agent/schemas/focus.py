@@ -12,12 +12,14 @@ class FocusStateRecognitionOutput(BaseModel):
 
     state_type: FocusStateType
     confidence: float = Field(ge=0.0, le=1.0)
+    focus_score: int = Field(default=0, ge=0, le=100)
     explanation: str = Field(min_length=1)
 
 
 class FocusReportOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    focus_score: int = Field(default=0, ge=0, le=100)
     effective_focus_minutes: int = Field(ge=0)
     away_count: int = Field(ge=0)
     distracted_count: int = Field(ge=0)

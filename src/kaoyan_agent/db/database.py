@@ -46,6 +46,7 @@ def init_db() -> None:
         migrate_v11_fix_trace_columns(connection)
         migrate_v12_memory_backends(connection)
         migrate_v13_nightly_memory_chain(connection)
+        migrate_v14_focus_scores(connection)
         connection.commit()
 
 
@@ -814,6 +815,13 @@ def migrate_v13_nightly_memory_chain(connection: sqlite3.Connection) -> None:
     connection.execute("CREATE INDEX IF NOT EXISTS idx_global_graph_nodes_type_status ON global_graph_nodes (node_type, status)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_global_graph_edges_source ON global_graph_edges (source_node_key, relation_type)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_global_graph_edges_target ON global_graph_edges (target_node_key, relation_type)")
+
+
+def migrate_v14_focus_scores(connection: sqlite3.Connection) -> None:
+    """Add focus-score columns without rewriting existing focus records."""
+
+    ensure_column(connection, "focus_state_events", "focus_score", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(connection, "focus_reports", "focus_score", "INTEGER NOT NULL DEFAULT 0")
 
 
 def rows_to_dicts(rows: List[sqlite3.Row]) -> List[Dict[str, Any]]:

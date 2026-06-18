@@ -565,6 +565,7 @@ CREATE TABLE IF NOT EXISTS focus_state_events (
     focus_session_id INTEGER NOT NULL,
     state_type TEXT NOT NULL CHECK (state_type IN ('focused', 'away', 'distracted', 'blocked', 'unknown')),
     confidence REAL NOT NULL DEFAULT 0.0,
+    focus_score INTEGER NOT NULL DEFAULT 0,
     explanation TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     FOREIGN KEY (focus_session_id) REFERENCES focus_sessions(id) ON DELETE CASCADE
@@ -573,6 +574,7 @@ CREATE TABLE IF NOT EXISTS focus_state_events (
 CREATE TABLE IF NOT EXISTS focus_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     focus_session_id INTEGER NOT NULL,
+    focus_score INTEGER NOT NULL DEFAULT 0,
     effective_focus_minutes INTEGER NOT NULL DEFAULT 0,
     away_count INTEGER NOT NULL DEFAULT 0,
     distracted_count INTEGER NOT NULL DEFAULT 0,
