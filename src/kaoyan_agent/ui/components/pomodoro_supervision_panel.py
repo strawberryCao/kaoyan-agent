@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import threading
 import time
 from datetime import datetime, timezone
@@ -332,17 +333,17 @@ def render_timer_card(
     current_id,
     controls: list[str],
 ) -> None:
-    st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-    st.markdown('<div class="kaoyan-card-title">番茄钟</div>', unsafe_allow_html=True)
+    html_content = '<div class="kaoyan-card">'
+    html_content += '<div class="kaoyan-card-title">番茄钟</div>'
+    html_content += '</div>'
+    st.html(html_content)
     if "start" in controls:
         render_start_controls(workflow)
-        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     if not current_id:
         st.warning("未找到活动中的番茄钟，请重新开始。")
         workflow.reset_timer(st.session_state)
-        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     render_live_focus_timer(timer_state.model_dump())
@@ -369,7 +370,6 @@ def render_timer_card(
         else:
             st.warning(result["message"])
         st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_start_controls(workflow: FocusWorkflow) -> None:
@@ -420,15 +420,14 @@ def render_vision_supervision_card(workflow: FocusWorkflow, current_id, settings
         )
     latest = st.session_state.get("latest_supervision_recognition") or {}
 
-    st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-    st.markdown('<div class="kaoyan-card-title">实时视觉督学</div>', unsafe_allow_html=True)
     available = recognizer.is_available()
-    st.markdown(
-        f'<span class="kaoyan-badge">本地 YOLO：{"可用" if available else "不可用"}</span>'
-        f'<span class="kaoyan-badge">摄像头：{settings.yolo_focus_camera_id}</span>'
-        f'<span class="kaoyan-badge">FPS：{settings.yolo_focus_inference_fps}</span>',
-        unsafe_allow_html=True,
-    )
+    html_content = '<div class="kaoyan-card">'
+    html_content += '<div class="kaoyan-card-title">实时视觉督学</div>'
+    html_content += f'<span class="kaoyan-badge">本地 YOLO：{"可用" if available else "不可用"}</span>'
+    html_content += f'<span class="kaoyan-badge">摄像头：{settings.yolo_focus_camera_id}</span>'
+    html_content += f'<span class="kaoyan-badge">FPS：{settings.yolo_focus_inference_fps}</span>'
+    html_content += '</div>'
+    st.html(html_content)
     st.caption(f"权重路径：{selected_weights or '未找到 .pt'}")
     col_label, col_conf, col_score = st.columns(3)
     col_label.metric("当前识别", latest.get("label_text") or LABEL_TEXT["unknown"])
@@ -471,7 +470,6 @@ def render_vision_supervision_card(workflow: FocusWorkflow, current_id, settings
             "latest": latest,
         },
     )
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_yolo_diagnostics(settings: Settings) -> None:
@@ -536,25 +534,30 @@ def render_state_timeline(workflow: FocusWorkflow, focus_session_id: int) -> Non
         st.info("本次专注还没有视觉或手动状态记录。")
         return
     for event in events[-8:]:
-        st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-        st.markdown(
-            f"**{STATE_LABEL_ZH.get(event.get('state_type'), '未知')}** "
-            f"/ 置信度 {float(event.get('confidence') or 0):.2f}"
+        state_label = html.escape(STATE_LABEL_ZH.get(event.get("state_type"), "未知"))
+        explanation = html.escape(str(event.get("explanation") or ""))
+        created_at = html.escape(str(event.get("created_at") or ""))
+        confidence = float(event.get("confidence") or 0)
+        html_content = '<div class="kaoyan-card">'
+        html_content += (
+            f'<div class="kaoyan-card-title">{state_label} / 置信度 {confidence:.2f}</div>'
         )
-        st.caption(f"{event.get('created_at')} / {event.get('explanation') or ''}")
-        st.markdown("</div>", unsafe_allow_html=True)
+        html_content += f'<div class="kaoyan-muted">{created_at} / {explanation}</div>'
+        html_content += '</div>'
+        st.html(html_content)
 
 
 def render_focus_report(report: dict) -> None:
     render_section_title("最近督学报告")
-    st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-    st.markdown(f"**专注度：** {int(report.get('focus_score') or 0)}/100")
-    st.markdown(f"**专注质量：** {report.get('focus_quality', '')}")
-    st.markdown(f"**有效专注：** {report.get('effective_focus_minutes', 0)} 分钟")
-    st.markdown(f"**总结：** {report.get('ai_summary', '')}")
-    st.markdown(f"**问题线索：** {report.get('possible_problem_signal', '')}")
-    st.markdown(f"**建议行动：** {report.get('suggested_action', '')}")
-    st.markdown("</div>", unsafe_allow_html=True)
+    html_content = '<div class="kaoyan-card">'
+    html_content += f'<div class="kaoyan-card-title">专注度：{int(report.get("focus_score") or 0)}/100</div>'
+    html_content += f'<div>专注质量：{html.escape(str(report.get("focus_quality") or ""))}</div>'
+    html_content += f'<div>有效专注：{int(report.get("effective_focus_minutes") or 0)} 分钟</div>'
+    html_content += f'<div>总结：{html.escape(str(report.get("ai_summary") or ""))}</div>'
+    html_content += f'<div>问题线索：{html.escape(str(report.get("possible_problem_signal") or ""))}</div>'
+    html_content += f'<div>建议行动：{html.escape(str(report.get("suggested_action") or ""))}</div>'
+    html_content += '</div>'
+    st.html(html_content)
 
 
 def format_duration(seconds: int) -> str:
@@ -611,14 +614,16 @@ def render_focus_stats(workflow: FocusWorkflow) -> None:
     if recent_sessions:
         with st.expander("最近专注记录", expanded=False):
             for session in recent_sessions:
-                st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-                st.markdown(
-                    f"**{session.get('task_title') or '临时专注任务'}** / "
-                    f"{session.get('subject') or '未指定'}"
+                title = html.escape(str(session.get("task_title") or "临时专注任务"))
+                subject = html.escape(str(session.get("subject") or "未指定"))
+                status = html.escape(render_status_badge(session.get("completion_status", "")))
+                planned = int(session.get("planned_minutes") or 0)
+                actual = round(int(session.get("actual_seconds") or 0) / 60, 1)
+                html_content = '<div class="kaoyan-card">'
+                html_content += f'<div class="kaoyan-card-title">{title} / {subject}</div>'
+                html_content += (
+                    f'<div class="kaoyan-muted">计划 {planned} 分钟 / '
+                    f'实际 {actual} 分钟 / 状态：{status}</div>'
                 )
-                st.caption(
-                    f"计划 {session.get('planned_minutes', 0)} 分钟 / "
-                    f"实际 {round(int(session.get('actual_seconds') or 0) / 60, 1)} 分钟 / "
-                    f"状态：{render_status_badge(session.get('completion_status', ''))}"
-                )
-                st.markdown("</div>", unsafe_allow_html=True)
+                html_content += '</div>'
+                st.html(html_content)

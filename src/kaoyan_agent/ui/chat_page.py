@@ -1,3 +1,5 @@
+import html
+
 import streamlit as st
 
 from kaoyan_agent.core.settings import Settings
@@ -123,25 +125,23 @@ def render_pending_actions_for_message(
         if pending.get("action_type") != "create_review_card":
             continue
         payload = pending.get("payload") or {}
-        st.markdown('<div class="kaoyan-card">', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="kaoyan-card-title">建议保存为错题卡</div>',
-            unsafe_allow_html=True,
+        html_content = '<div class="kaoyan-card">'
+        html_content += '<div class="kaoyan-card-title">建议保存为错题卡</div>'
+        html_content += (
+            f'<span class="kaoyan-badge">{html.escape(render_status_badge(pending.get("status", "")))}</span>'
+            f'<span class="kaoyan-badge">{html.escape(str(payload.get("subject") or "未指定科目"))}</span>'
+            f'<span class="kaoyan-badge">{html.escape(str(payload.get("chapter") or "未指定章节"))}</span>'
         )
-        st.markdown(
-            f'<span class="kaoyan-badge">{render_status_badge(pending.get("status", ""))}</span>'
-            f'<span class="kaoyan-badge">{payload.get("subject") or "未指定科目"}</span>'
-            f'<span class="kaoyan-badge">{payload.get("chapter") or "未指定章节"}</span>',
-            unsafe_allow_html=True,
+        html_content += (
+            f'<div>题目摘要：{html.escape(str(payload.get("question_summary") or payload.get("question") or "未填写"))}</div>'
         )
-        st.markdown(
-            f"**题目摘要：** {payload.get('question_summary') or payload.get('question') or '未填写'}"
+        html_content += f'<div>错因线索：{html.escape(str(payload.get("user_reason") or "待确认"))}</div>'
+        html_content += (
+            f'<div>错因分类：{html.escape(mistake_reason_label(payload.get("mistake_reason", "unknown")))}</div>'
         )
-        st.markdown(f"**错因线索：** {payload.get('user_reason') or '待确认'}")
-        st.markdown(
-            f"**错因分类：** {mistake_reason_label(payload.get('mistake_reason', 'unknown'))}"
-        )
-        st.markdown(f"**复习优先级：** {payload.get('review_priority') or 3}")
+        html_content += f'<div>复习优先级：{html.escape(str(payload.get("review_priority") or 3))}</div>'
+        html_content += '</div>'
+        st.html(html_content)
         status = str(pending.get("status") or "")
         if status == "pending_confirmation":
             col_save, col_answer, col_later = st.columns(3)
@@ -162,7 +162,6 @@ def render_pending_actions_for_message(
             st.success("已保存为错题卡，可在「错题复盘」查看。")
         elif status == "dismissed":
             st.info("已按你的选择保留解答，不保存错题卡。")
-        st.markdown("</div>", unsafe_allow_html=True)
 
 
 def show_pending_result(result: dict) -> None:
