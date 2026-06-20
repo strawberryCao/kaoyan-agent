@@ -1,6 +1,7 @@
 import base64
 from typing import Any, Dict, List, Optional, Type
-
+import json
+from kaoyan_agent.core.json_parser import parse_json_object
 from pydantic import BaseModel
 
 from kaoyan_agent.core.settings import Settings, get_settings
@@ -122,29 +123,56 @@ def run_structured_agent(
     temperature: float = 0.2,
     tools: Optional[List[Any]] = None,
 ) -> BaseModel:
-    """Unified structured-output call.
-
-    Builds the agent, invokes it, validates ``structured_response`` against the
-    given Pydantic model, and returns the validated instance. Raises on missing
-    or empty ``structured_response`` so each agent's local fallback can take over.
+    """兼容 DeepSee接口的结构化输出调用。
+    不直接把 Pydantic 模型作为 response_format 传给模型 而是让模型输出json再进行pydantic校验。
     """
+
+    schema_text = json.dumps(
+        response_format.model_json_schema(),
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    json_user_message = (
+        f"{user_message}\n\n"
+        "请严格按照以下要求输出：\n"
+        "1. 只输出一个 JSON 对象。\n"
+        "2. 不要输出 Markdown 代码块。\n"
+        "3. 不要输出解释性文字。\n"
+        "4. 不要在 JSON 前后添加任何额外内容。\n"
+        "5. JSON 字段必须符合下面的 schema。\n\n"
+        f"{schema_text}"
+    )
 
     agent = _build_agent(
         system_prompt=system_prompt,
         settings=settings,
         temperature=temperature,
         tools=tools,
-        response_format=response_format,
+        response_format=None,
     )
-    response = agent.invoke({"messages": [{"role": "user", "content": user_message}]})
-    if not isinstance(response, dict) or "structured_response" not in response:
-        raise ValueError("LangChain response is missing structured_response.")
 
-    structured_response = response["structured_response"]
-    if structured_response is None:
-        raise ValueError("LangChain structured_response is empty.")
-    return response_format.model_validate(structured_response)
+    response = agent.invoke(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": json_user_message,
+                }
+            ]
+        }
+    )
 
+    raw_text = _extract_final_text(response)
+    parsed = parse_json_object(raw_text)
+
+    if parsed is None:
+        raise ValueError(
+            "LLM response is not a valid JSON object. "
+            f"Raw response: {raw_text[:500]}"
+        )
+
+    return response_format.model_validate(parsed)
 
 def run_structured_vision_agent(
     response_format: Type[BaseModel],
