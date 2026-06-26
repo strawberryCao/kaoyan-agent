@@ -45,3 +45,34 @@ The original task C/D/E feature packages are archived under
   backend is detected, the UI says so explicitly and shows the current
   lightweight retrieval formula instead of claiming FAISS, Chroma, Qdrant, or
   Neo4j is enabled.
+
+## Reliable visual supervision v2
+
+- Study behavior and person presence use separate local YOLO models. A missing
+  behavior box is `unknown`, never an automatic `away` result.
+- `away` requires 10 continuous seconds without a person detection. Behavior
+  states use a 3-second temporal window and phone use takes priority.
+- Stable state segments persist duration and detector version. Reports calculate
+  numeric metrics deterministically and require at least 80% session and
+  classified coverage before making whole-session claims.
+- Legacy local-YOLO evidence remains in SQLite as `legacy_unverified` but is
+  excluded from new nightly memory and problem-discovery inputs.
+- Camera frames and bounding boxes are not persisted.
+
+## Zero-label visual supervision v3
+
+- The SCB pilot behavior detector is no longer a default decision source. It is
+  kept only in diagnostics because the classroom dataset does not match the
+  local dorm/webcam view well enough.
+- The default runtime uses the fixed COCO YOLO weight for `person` and
+  `cell phone`. Phone evidence has priority over focused evidence.
+- Local face/pose evidence is optional: MediaPipe is used when available, and
+  OpenCV face detection is used as a lightweight fallback. No camera frames are
+  persisted.
+- If face/pose evidence is unavailable or fails on a frame, a high-confidence
+  `person` detection with no phone can produce a low-confidence visual-evidence
+  `focused` result after temporal smoothing. UI text treats this as evidence
+  based "suspected focus", not a claim about mental attention.
+- Grounding DINO is not part of the default realtime path because it is too
+  heavy for the current supervision loop. It remains a future optional enhancer
+  for objects such as book, pen, paper, and phone.

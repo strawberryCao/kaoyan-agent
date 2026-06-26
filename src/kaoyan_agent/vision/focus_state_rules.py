@@ -78,15 +78,22 @@ class FocusStateRuleEngine:
             return self.result("away", away, labels, metrics)
         if not person_present and not labels:
             return FocusRuleResult(
-                state_type="away",
-                confidence=0.65,
-                explanation="Local detector found no visible person or study behavior.",
+                state_type="unknown",
+                confidence=0.0,
+                explanation="No behavior detection is not proof that the person left.",
                 metrics=metrics,
             )
         if distracted > 0:
             return self.result("distracted", distracted, labels, metrics)
-        if focused > 0 or person_present:
-            return self.result("focused", max(focused, 0.55), labels, metrics)
+        if focused > 0:
+            return self.result("focused", focused, labels, metrics)
+        if person_present:
+            return FocusRuleResult(
+                state_type="unknown",
+                confidence=0.0,
+                explanation="Person is visible but study behavior is not determined.",
+                metrics=metrics,
+            )
         return FocusRuleResult(
             state_type="unknown",
             confidence=0.2,

@@ -18,10 +18,34 @@ from kaoyan_agent.repositories.skill_memory_repository import SkillMemoryReposit
 from kaoyan_agent.schemas.contracts import NightlyWorkflowResult
 from kaoyan_agent.schemas.nightly_memory import NightlyMemoryUpdateOutput
 from kaoyan_agent.services.memory_index_service import MemoryIndexService
+from kaoyan_agent.services.focus_temporal_tracker import DETECTOR_VERSION
 
 
 def today_str() -> str:
     return datetime.now().astimezone().date().isoformat()
+
+
+def filter_reliable_focus_evidence(raw_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Keep legacy rows in SQLite while preventing them from driving new memories."""
+
+    filtered: list[Dict[str, Any]] = []
+    for event in raw_events:
+        source_type = str(event.get("source_type") or "")
+        metadata = event.get("metadata") or {}
+        if source_type == "focus_state_event":
+            recognition_source = str(metadata.get("recognition_source") or "")
+            version = str(metadata.get("detector_version") or "")
+            if recognition_source == "local_yolo" and version != DETECTOR_VERSION:
+                continue
+            if recognition_source != "manual" and str(metadata.get("evidence_status") or "") != "sufficient":
+                continue
+        if source_type == "focus_report":
+            version = str(metadata.get("detector_version") or "")
+            evidence_status = str(metadata.get("evidence_status") or "")
+            if version != DETECTOR_VERSION or evidence_status != "sufficient":
+                continue
+        filtered.append(event)
+    return filtered
 
 
 class NightlyMemoryWorkflow:
@@ -73,7 +97,12 @@ class NightlyMemoryWorkflow:
 
         sessions = self.nightly_repository.list_sessions_by_date(review_date, project_id=project_id)
         conversations = self.nightly_repository.list_conversations_by_date(review_date, project_id=project_id)
-        raw_events = self.raw_event_repository.list_by_project_and_date(project_id=project_id, date_str=review_date)
+        raw_events = filter_reliable_focus_evidence(
+            self.raw_event_repository.list_by_project_and_date(
+                project_id=project_id,
+                date_str=review_date,
+            )
+        )
         focus_sessions = self.nightly_repository.list_focus_sessions_by_date(review_date, project_id=project_id)
         mistake_cards = self.nightly_repository.list_mistake_cards_by_date(review_date, project_id=project_id)
         study_tasks = self.nightly_repository.list_study_tasks_by_date(review_date, project_id=project_id)

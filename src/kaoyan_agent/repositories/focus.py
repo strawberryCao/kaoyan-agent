@@ -80,6 +80,8 @@ class FocusRepository:
         confidence: float = 0.0,
         focus_score: int = 0,
         explanation: str = "",
+        observed_seconds: int = 0,
+        detector_version: str = "legacy_unverified",
     ) -> int:
         if state_type not in {"focused", "away", "distracted", "blocked", "unknown"}:
             state_type = "unknown"
@@ -92,12 +94,23 @@ class FocusRepository:
                     state_type,
                     confidence,
                     focus_score,
+                    observed_seconds,
+                    detector_version,
                     explanation,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (focus_session_id, state_type, confidence, focus_score, explanation, utc_now()),
+                (
+                    focus_session_id,
+                    state_type,
+                    confidence,
+                    focus_score,
+                    max(0, int_value(observed_seconds, 0)),
+                    str(detector_version or "legacy_unverified"),
+                    explanation,
+                    utc_now(),
+                ),
             )
             connection.commit()
             return int(cursor.lastrowid)
@@ -222,6 +235,8 @@ class FocusRepository:
                     state_type,
                     confidence,
                     focus_score,
+                    observed_seconds,
+                    detector_version,
                     explanation,
                     created_at
                 FROM focus_state_events
@@ -242,6 +257,8 @@ class FocusRepository:
                     state_type,
                     confidence,
                     focus_score,
+                    observed_seconds,
+                    detector_version,
                     explanation,
                     created_at
                 FROM focus_state_events
@@ -468,10 +485,19 @@ class FocusRepository:
                     ai_summary,
                     possible_problem_signal,
                     suggested_action,
+                    monitored_seconds,
+                    coverage_ratio,
+                    classified_ratio,
+                    focused_seconds,
+                    distracted_seconds,
+                    away_seconds,
+                    unknown_seconds,
+                    evidence_status,
+                    detector_version,
                     raw_result_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     focus_session_id,
@@ -485,6 +511,15 @@ class FocusRepository:
                     str(report.get("ai_summary") or ""),
                     str(report.get("possible_problem_signal") or ""),
                     str(report.get("suggested_action") or ""),
+                    int(report.get("monitored_seconds") or 0),
+                    float(report.get("coverage_ratio") or 0.0),
+                    float(report.get("classified_ratio") or 0.0),
+                    int(report.get("focused_seconds") or 0),
+                    int(report.get("distracted_seconds") or 0),
+                    int(report.get("away_seconds") or 0),
+                    int(report.get("unknown_seconds") or 0),
+                    str(report.get("evidence_status") or "insufficient"),
+                    str(report.get("detector_version") or "zero_label_evidence_v1"),
                     json_dumps(report, {}),
                     utc_now(),
                 ),
@@ -509,6 +544,15 @@ class FocusRepository:
                     ai_summary,
                     possible_problem_signal,
                     suggested_action,
+                    monitored_seconds,
+                    coverage_ratio,
+                    classified_ratio,
+                    focused_seconds,
+                    distracted_seconds,
+                    away_seconds,
+                    unknown_seconds,
+                    evidence_status,
+                    detector_version,
                     raw_result_json,
                     created_at
                 FROM focus_reports
@@ -535,6 +579,15 @@ class FocusRepository:
                     ai_summary,
                     possible_problem_signal,
                     suggested_action,
+                    monitored_seconds,
+                    coverage_ratio,
+                    classified_ratio,
+                    focused_seconds,
+                    distracted_seconds,
+                    away_seconds,
+                    unknown_seconds,
+                    evidence_status,
+                    detector_version,
                     raw_result_json,
                     created_at
                 FROM focus_reports

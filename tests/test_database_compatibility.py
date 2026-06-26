@@ -14,6 +14,65 @@ from kaoyan_agent.repositories.project_repository import ProjectRepository
 
 
 class DatabaseCompatibilityTest(unittest.TestCase):
+    def test_focus_evidence_migration_preserves_legacy_rows(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "app.db"
+            settings = Settings("", None, "test-model", database_path=db_path)
+            with closing(sqlite3.connect(db_path)) as connection:
+                connection.execute(
+                    """
+                    CREATE TABLE focus_state_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        focus_session_id INTEGER NOT NULL,
+                        state_type TEXT NOT NULL,
+                        confidence REAL NOT NULL DEFAULT 0.0,
+                        focus_score INTEGER NOT NULL DEFAULT 0,
+                        explanation TEXT NOT NULL DEFAULT '',
+                        created_at TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE focus_reports (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        focus_session_id INTEGER NOT NULL,
+                        focus_score INTEGER NOT NULL DEFAULT 0,
+                        effective_focus_minutes INTEGER NOT NULL DEFAULT 0,
+                        away_count INTEGER NOT NULL DEFAULT 0,
+                        distracted_count INTEGER NOT NULL DEFAULT 0,
+                        blocked_count INTEGER NOT NULL DEFAULT 0,
+                        longest_focus_minutes INTEGER NOT NULL DEFAULT 0,
+                        focus_quality TEXT NOT NULL DEFAULT '',
+                        ai_summary TEXT NOT NULL DEFAULT '',
+                        possible_problem_signal TEXT NOT NULL DEFAULT '',
+                        suggested_action TEXT NOT NULL DEFAULT '',
+                        raw_result_json TEXT NOT NULL DEFAULT '{}',
+                        created_at TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    "INSERT INTO focus_state_events (focus_session_id, state_type, created_at) VALUES (1, 'away', '2026-06-20T00:00:00+00:00')"
+                )
+                connection.execute(
+                    "INSERT INTO focus_reports (focus_session_id, created_at) VALUES (1, '2026-06-20T00:01:00+00:00')"
+                )
+                connection.commit()
+
+            with patch.object(database, "get_settings", return_value=settings):
+                database.init_db()
+                with closing(sqlite3.connect(db_path)) as connection:
+                    state = connection.execute(
+                        "SELECT observed_seconds, detector_version FROM focus_state_events WHERE id = 1"
+                    ).fetchone()
+                    report = connection.execute(
+                        "SELECT monitored_seconds, evidence_status, detector_version FROM focus_reports WHERE id = 1"
+                    ).fetchone()
+
+            self.assertEqual(state, (0, "legacy_unverified"))
+            self.assertEqual(report, (0, "legacy_unverified", "legacy_unverified"))
+
     def test_init_db_upgrades_legacy_trace_tables_missing_new_columns(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "app.db"

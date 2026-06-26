@@ -11,6 +11,7 @@ neo4j>=5.20
 streamlit-webrtc>=0.47
 opencv-python>=4.9
 ultralytics>=8.3
+mediapipe>=0.10.14; python_version < "3.13"
 
 # Build tools required by pyproject.toml for editable installs.
 setuptools>=68

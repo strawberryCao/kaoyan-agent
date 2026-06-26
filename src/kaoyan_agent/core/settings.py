@@ -40,6 +40,14 @@ class Settings:
     yolo_focus_camera_id: int = 0
     yolo_focus_confidence_threshold: float = 0.5
     yolo_focus_inference_fps: int = 3
+    yolo_person_weights_path: Path = PROJECT_ROOT / "models" / "person_presence" / "yolov8n.pt"
+    yolo_person_confidence_threshold: float = 0.35
+    focus_phone_confidence_threshold: float = 0.35
+    focus_visual_evidence_threshold: float = 0.55
+    focus_presence_focus_confidence_threshold: float = 0.65
+    yolo_away_confirm_seconds: int = 10
+    yolo_behavior_window_seconds: int = 3
+    focus_report_min_coverage: float = 0.8
 
 
 def get_settings() -> Settings:
@@ -63,6 +71,46 @@ def get_settings() -> Settings:
         yolo_fps = int(os.getenv("YOLO_FOCUS_INFERENCE_FPS", "3") or 3)
     except ValueError:
         yolo_fps = 3
+    person_weights_path = os.getenv(
+        "YOLO_PERSON_WEIGHTS_PATH",
+        "models/person_presence/yolov8n.pt",
+    ).strip()
+    try:
+        person_confidence = float(
+            os.getenv("YOLO_PERSON_CONFIDENCE_THRESHOLD", "0.35") or 0.35
+        )
+    except ValueError:
+        person_confidence = 0.35
+    try:
+        phone_confidence = float(
+            os.getenv("FOCUS_PHONE_CONFIDENCE_THRESHOLD", "0.35") or 0.35
+        )
+    except ValueError:
+        phone_confidence = 0.35
+    try:
+        visual_evidence_threshold = float(
+            os.getenv("FOCUS_VISUAL_EVIDENCE_THRESHOLD", "0.55") or 0.55
+        )
+    except ValueError:
+        visual_evidence_threshold = 0.55
+    try:
+        presence_focus_threshold = float(
+            os.getenv("FOCUS_PRESENCE_FOCUS_CONFIDENCE_THRESHOLD", "0.65") or 0.65
+        )
+    except ValueError:
+        presence_focus_threshold = 0.65
+    try:
+        away_confirm_seconds = int(os.getenv("YOLO_AWAY_CONFIRM_SECONDS", "10") or 10)
+    except ValueError:
+        away_confirm_seconds = 10
+    try:
+        behavior_window_seconds = int(os.getenv("YOLO_BEHAVIOR_WINDOW_SECONDS", "3") or 3)
+    except ValueError:
+        behavior_window_seconds = 3
+    try:
+        report_min_coverage = float(os.getenv("FOCUS_REPORT_MIN_COVERAGE", "0.8") or 0.8)
+    except ValueError:
+        report_min_coverage = 0.8
 
     return Settings(
         llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
@@ -95,5 +143,17 @@ def get_settings() -> Settings:
         yolo_focus_camera_id=max(0, yolo_camera_id),
         yolo_focus_confidence_threshold=max(0.0, min(1.0, yolo_confidence)),
         yolo_focus_inference_fps=max(1, min(30, yolo_fps)),
+        yolo_person_weights_path=(
+            Path(person_weights_path)
+            if Path(person_weights_path).is_absolute()
+            else PROJECT_ROOT / person_weights_path
+        ),
+        yolo_person_confidence_threshold=max(0.0, min(1.0, person_confidence)),
+        focus_phone_confidence_threshold=max(0.0, min(1.0, phone_confidence)),
+        focus_visual_evidence_threshold=max(0.0, min(1.0, visual_evidence_threshold)),
+        focus_presence_focus_confidence_threshold=max(0.0, min(1.0, presence_focus_threshold)),
+        yolo_away_confirm_seconds=max(3, min(120, away_confirm_seconds)),
+        yolo_behavior_window_seconds=max(1, min(10, behavior_window_seconds)),
+        focus_report_min_coverage=max(0.0, min(1.0, report_min_coverage)),
     )
 

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from kaoyan_agent.core.settings import Settings, get_settings
 from kaoyan_agent.schemas.focus import (
     FocusReportOutput,
+    FocusReportNarrativeOutput,
     FocusStateRecognitionOutput,
 )
 from kaoyan_agent.services.llm_client import (
@@ -12,6 +13,7 @@ from kaoyan_agent.services.llm_client import (
     supports_vision_model,
 )
 from kaoyan_agent.vision.yolo_focus_detector import LocalYoloFocusDetector
+from kaoyan_agent.services.focus_report_calculator import calculate_focus_report
 
 
 ALLOWED_STATES = {"focused", "away", "distracted", "blocked", "unknown"}
@@ -107,15 +109,20 @@ class FocusSupervisionAgent:
         prompt = self.build_report_prompt(session, state_events, timeline_events or [])
         try:
             output = run_structured_agent(
-                FocusReportOutput,
+                FocusReportNarrativeOutput,
                 prompt,
                 system_prompt=REPORT_SYSTEM_PROMPT,
                 settings=self.settings,
                 temperature=0.2,
             )
-            return self.normalize_report(output.model_dump(), fallback)
+            return calculate_focus_report(
+                session,
+                state_events,
+                output.model_dump(),
+                minimum_coverage=getattr(self.settings, "focus_report_min_coverage", 0.8),
+            )
         except Exception as exc:
-            result = self.normalize_report(fallback, fallback)
+            result = dict(fallback)
             result["generation_error"] = str(exc)
             return result
 
@@ -158,12 +165,12 @@ class FocusSupervisionAgent:
         timeline_events: List[Dict[str, Any]],
     ) -> str:
         return (
-            "Generate one focus supervision report from this session.\n"
+            "Generate only a short narrative for one focus supervision report.\n"
             f"Session: {session}\n"
             f"State events: {state_events}\n"
             f"Timeline events: {timeline_events}\n"
-            "Include focus_score as an integer from 0 to 100, where 100 means "
-            "highly focused and 0 means no usable focus evidence.\n"
+            "Return only ai_summary, possible_problem_signal, and suggested_action. "
+            "Never invent durations, counts, scores, or unmonitored behavior.\n"
             "Connect patterns to possible learning problems, for example startup "
             "difficulty, oversized plan, unclear next action, or execution drift."
         )
@@ -173,51 +180,11 @@ class FocusSupervisionAgent:
         session: Dict[str, Any],
         state_events: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        planned = self.safe_int(session.get("planned_minutes"), 0)
-        actual = self.safe_int(session.get("actual_minutes"), planned)
-        counts = Counter(str(event.get("state_type") or "unknown") for event in state_events)
-        total = sum(counts.values())
-        focused = counts.get("focused", 0)
-        away = counts.get("away", 0)
-        distracted = counts.get("distracted", 0)
-        blocked = counts.get("blocked", 0)
-        focus_score = self.session_focus_score(state_events)
-        effective = actual if total == 0 else round(actual * focused / total)
-
-        if total == 0:
-            quality = "no camera evidence"
-        elif focused / total >= 0.75:
-            quality = "stable"
-        elif away + distracted + blocked >= focused:
-            quality = "unstable"
-        else:
-            quality = "mixed"
-
-        possible_signal = "No strong problem signal yet."
-        if total == 0:
-            possible_signal = "Focus session lacks supervision evidence."
-        elif away > 0 and away >= focused:
-            possible_signal = "User may leave soon after starting; possible startup or environment issue."
-        elif distracted > 0 and distracted >= focused:
-            possible_signal = "Frequent distraction may indicate task pressure or unclear next action."
-        elif actual < planned:
-            possible_signal = "Actual focus time was lower than planned; task size may be too large."
-
-        return {
-            "focus_score": focus_score,
-            "effective_focus_minutes": max(0, effective),
-            "away_count": away,
-            "distracted_count": distracted,
-            "blocked_count": blocked,
-            "longest_focus_minutes": max(0, effective),
-            "focus_quality": quality,
-            "ai_summary": (
-                f"Recorded {total} supervision states: "
-                f"{focused} focused, {away} away, {distracted} distracted, {blocked} blocked."
-            ),
-            "possible_problem_signal": possible_signal,
-            "suggested_action": "Review this focus session in the nightly memory update.",
-        }
+        return calculate_focus_report(
+            session,
+            state_events,
+            minimum_coverage=getattr(self.settings, "focus_report_min_coverage", 0.8),
+        )
 
     def normalize_report(
         self,
@@ -269,7 +236,7 @@ class FocusSupervisionAgent:
             return max(0, round((1.0 - confidence) * 40))
         if state_type in {"away", "blocked"}:
             return 0
-        return max(0, round((1.0 - confidence) * 20))
+        return 0
 
     def session_focus_score(self, state_events: List[Dict[str, Any]]) -> int:
         if not state_events:

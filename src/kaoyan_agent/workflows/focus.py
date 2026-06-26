@@ -2,11 +2,14 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from kaoyan_agent.agents.focus_supervision_agent import FocusSupervisionAgent
+from kaoyan_agent.core.settings import Settings, get_settings
 from kaoyan_agent.repositories.focus import FocusRepository
 from kaoyan_agent.repositories.raw_events import RawEventRepository
 from kaoyan_agent.repositories.study_tasks import StudyTaskRepository
 from kaoyan_agent.schemas.focus import FocusTimerState, FocusTimerStatus
 from kaoyan_agent.schemas.study_task import DailyTaskStatus
+from kaoyan_agent.services.focus_report_calculator import calculate_focus_report
+from kaoyan_agent.services.focus_temporal_tracker import DETECTOR_VERSION
 
 
 FOCUS_TIMER_STATE_KEY = "focus_timer_state"
@@ -23,12 +26,14 @@ class FocusWorkflow:
         supervision_agent: FocusSupervisionAgent | None = None,
         task_repository: StudyTaskRepository | None = None,
         project_id: Optional[int] = None,
+        settings: Settings | None = None,
     ):
         self.focus_repository = focus_repository or FocusRepository()
         self.raw_event_repository = raw_event_repository or RawEventRepository()
         self.supervision_agent = supervision_agent or FocusSupervisionAgent()
         self.task_repository = task_repository or StudyTaskRepository()
         self.project_id = project_id
+        self.settings = settings or getattr(self.supervision_agent, "settings", None) or get_settings()
 
     def start_focus_session(
         self,
@@ -326,9 +331,18 @@ class FocusWorkflow:
         focus_score: Optional[int] = None,
         explanation: str = "",
         metadata: Optional[Dict[str, Any]] = None,
+        observed_seconds: int = 0,
+        detector_version: str = DETECTOR_VERSION,
         force: bool = False,
         min_log_interval_seconds: int = 10,
     ) -> Dict[str, Any]:
+        session = self.focus_repository.get_session(focus_session_id)
+        if not self.is_session_active(session):
+            return {
+                "status": "rejected",
+                "reason": "session_ended",
+                "state_type": state_type,
+            }
         state_type = state_type if state_type in {"focused", "away", "distracted", "blocked", "unknown"} else "unknown"
         latest = self.focus_repository.get_latest_state_event(focus_session_id)
         should_write = force or latest is None or str(latest.get("state_type")) != state_type
@@ -357,6 +371,8 @@ class FocusWorkflow:
             focus_score=focus_score,
             explanation=explanation,
             metadata=metadata,
+            observed_seconds=observed_seconds,
+            detector_version=detector_version,
         )
         return {
             "status": "recorded",
@@ -372,7 +388,12 @@ class FocusWorkflow:
         focus_score: Optional[int] = None,
         explanation: str = "",
         metadata: Optional[Dict[str, Any]] = None,
+        observed_seconds: int = 0,
+        detector_version: str = DETECTOR_VERSION,
     ) -> int:
+        session = self.focus_repository.get_session(focus_session_id)
+        if not self.is_session_active(session):
+            raise ValueError("Cannot write supervision evidence to an ended focus session.")
         if focus_score is None:
             focus_score = self.default_focus_score(state_type, confidence)
         event_id = self.focus_repository.record_state_event(
@@ -381,13 +402,18 @@ class FocusWorkflow:
             confidence=confidence,
             focus_score=focus_score,
             explanation=explanation,
+            observed_seconds=observed_seconds,
+            detector_version=detector_version,
         )
-        session = self.focus_repository.get_session(focus_session_id) or {}
+        session = session or {}
         event_metadata = {
             "focus_session_id": focus_session_id,
             "state_type": state_type,
             "confidence": confidence,
             "focus_score": focus_score,
+            "observed_seconds": max(0, int(observed_seconds)),
+            "detector_version": detector_version,
+            "evidence_status": "sufficient" if max(0, int(observed_seconds)) > 0 else "insufficient",
         }
         if metadata:
             event_metadata.update(metadata)
@@ -434,6 +460,7 @@ class FocusWorkflow:
                 "recognition_source": recognition.get("recognition_source", "multimodal"),
                 "metrics": recognition.get("metrics", {}),
             },
+            detector_version=str(recognition.get("detector_version") or DETECTOR_VERSION),
         )
         return {**recognition, "event_id": event_id}
 
@@ -469,18 +496,19 @@ class FocusWorkflow:
             event_type="finish",
             note=reflection,
         )
-        if report:
-            report_id = self.focus_repository.create_report(focus_session_id, report)
-            self.record_report_raw_event(focus_session_id, report_id, report)
-            return report_id
-
         session = self.focus_repository.get_session(focus_session_id) or {}
         state_events = self.focus_repository.list_state_events(focus_session_id)
         timeline_events = self.focus_repository.list_timeline_events(focus_session_id)
-        generated_report = self.supervision_agent.generate_report(
+        narrative = report or self.supervision_agent.generate_report(
             session=session,
             state_events=state_events,
             timeline_events=timeline_events,
+        )
+        generated_report = calculate_focus_report(
+            session,
+            state_events,
+            narrative,
+            minimum_coverage=self.settings.focus_report_min_coverage,
         )
         report_id = self.focus_repository.create_report(focus_session_id, generated_report)
         self.record_report_raw_event(focus_session_id, report_id, generated_report)
@@ -510,6 +538,9 @@ class FocusWorkflow:
                 "focus_session_id": focus_session_id,
                 "focus_score": report.get("focus_score", 0),
                 "focus_quality": report.get("focus_quality", ""),
+                "evidence_status": report.get("evidence_status", "insufficient"),
+                "coverage_ratio": report.get("coverage_ratio", 0.0),
+                "detector_version": report.get("detector_version", DETECTOR_VERSION),
             },
         )
 
@@ -527,7 +558,16 @@ class FocusWorkflow:
             return max(0, round((1.0 - float(confidence)) * 40))
         if state_type in {"away", "blocked"}:
             return 0
-        return max(0, round((1.0 - float(confidence)) * 20))
+        return 0
+
+    @staticmethod
+    def is_session_active(session: Optional[Dict[str, Any]]) -> bool:
+        if not session:
+            return False
+        return (
+            str(session.get("timer_status") or "") == "running"
+            and not session.get("ended_at")
+        )
 
     @staticmethod
     def _now_iso() -> str:

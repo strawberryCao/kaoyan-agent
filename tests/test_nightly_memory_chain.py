@@ -11,7 +11,11 @@ from kaoyan_agent.agents.problem_discovery_agent import ProblemDiscoveryResult
 from kaoyan_agent.core.settings import Settings
 from kaoyan_agent.db import database
 from kaoyan_agent.schemas.nightly_memory import NightlyMemoryExtraction, NightlyMemoryUpdateOutput
-from kaoyan_agent.workflows.nightly_memory_workflow import NightlyMemoryWorkflow
+from kaoyan_agent.services.focus_temporal_tracker import DETECTOR_VERSION
+from kaoyan_agent.workflows.nightly_memory_workflow import (
+    NightlyMemoryWorkflow,
+    filter_reliable_focus_evidence,
+)
 
 
 def formal_payload() -> dict:
@@ -172,6 +176,43 @@ class FakeGraphProblemDiscovery:
 
 
 class NightlyMemoryFormalChainTest(unittest.TestCase):
+    def test_legacy_and_insufficient_yolo_evidence_is_filtered(self):
+        events = [
+            {"id": 1, "source_type": "chat_message", "metadata": {}},
+            {
+                "id": 2,
+                "source_type": "focus_state_event",
+                "metadata": {"recognition_source": "local_yolo"},
+            },
+            {
+                "id": 3,
+                "source_type": "focus_report",
+                "metadata": {
+                    "detector_version": DETECTOR_VERSION,
+                    "evidence_status": "insufficient",
+                },
+            },
+            {
+                "id": 4,
+                "source_type": "focus_report",
+                "metadata": {
+                    "detector_version": DETECTOR_VERSION,
+                    "evidence_status": "sufficient",
+                },
+            },
+            {
+                "id": 5,
+                "source_type": "focus_state_event",
+                "metadata": {
+                    "recognition_source": "manual",
+                },
+            },
+        ]
+
+        filtered = filter_reliable_focus_evidence(events)
+
+        self.assertEqual([event["id"] for event in filtered], [1, 4, 5])
+
     def test_formal_extraction_schema_accepts_semantic_and_daily_graph(self):
         output = NightlyMemoryExtraction.model_validate(formal_payload())
 

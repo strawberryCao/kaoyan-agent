@@ -23,6 +23,8 @@ models/**/*.onnx
 models/**/*.engine
 !models/focus_state_v1_pilot/
 !models/focus_state_v1_pilot/best.pt
+!models/person_presence/
+!models/person_presence/yolov8n.pt
 weights/
 runs/
 

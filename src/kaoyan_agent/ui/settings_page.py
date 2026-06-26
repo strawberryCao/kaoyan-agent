@@ -29,16 +29,11 @@ def render_settings_page(settings: Settings) -> None:
         recognizer = LocalYoloFocusRecognizer(
             candidates[0] if candidates else settings.yolo_focus_weights_path,
             confidence_threshold=settings.yolo_focus_confidence_threshold,
-            camera_id=settings.yolo_focus_camera_id,
-            check_camera=False,
-        )
-        camera = diagnose_camera_access(settings.yolo_focus_camera_id)
-
-        data = SettingsWorkflow().load_settings(settings=settings, memory_limit=1)
-        candidates = find_yolo_weight_candidates(settings.yolo_focus_weights_path)
-        recognizer = LocalYoloFocusRecognizer(
-            candidates[0] if candidates else settings.yolo_focus_weights_path,
-            confidence_threshold=settings.yolo_focus_confidence_threshold,
+            person_weights_path=settings.yolo_person_weights_path,
+            person_confidence_threshold=settings.yolo_person_confidence_threshold,
+            phone_confidence_threshold=settings.focus_phone_confidence_threshold,
+            visual_evidence_threshold=settings.focus_visual_evidence_threshold,
+            presence_focus_confidence_threshold=settings.focus_presence_focus_confidence_threshold,
             camera_id=settings.yolo_focus_camera_id,
             check_camera=False,
         )
@@ -59,8 +54,8 @@ def render_settings_page(settings: Settings) -> None:
         col_yolo, col_camera, col_fps = st.columns(3)
         with col_yolo:
             render_metric_card(
-                "本地 YOLO",
-                "可用" if recognizer.is_available() else "不可用",
+                "视觉证据模型",
+                "完整可用" if recognizer.is_fully_available() else "降级" if recognizer.is_available() else "不可用",
                 recognizer.status_message() or f"候选权重 {len(candidates)} 个",
             )
         with col_camera:
@@ -71,6 +66,18 @@ def render_settings_page(settings: Settings) -> None:
             )
         with col_fps:
             render_metric_card("识别 FPS", settings.yolo_focus_inference_fps)
+
+        col_phone, col_visual, col_presence = st.columns(3)
+        with col_phone:
+            render_metric_card("手机阈值", settings.focus_phone_confidence_threshold)
+        with col_visual:
+            render_metric_card("视觉证据阈值", settings.focus_visual_evidence_threshold)
+        with col_presence:
+            render_metric_card("人在场专注阈值", settings.focus_presence_focus_confidence_threshold)
+
+        col_legacy, _, _ = st.columns(3)
+        with col_legacy:
+            render_metric_card("旧行为模型", "仅诊断", f"候选 {len(candidates)} 个")
 
         with st.expander("详细路径与诊断", expanded=False):
             st.markdown("**Base URL**")

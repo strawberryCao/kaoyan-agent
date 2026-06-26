@@ -47,6 +47,7 @@ def init_db() -> None:
         migrate_v12_memory_backends(connection)
         migrate_v13_nightly_memory_chain(connection)
         migrate_v14_focus_scores(connection)
+        migrate_v15_focus_evidence(connection)
         connection.commit()
 
 
@@ -822,6 +823,37 @@ def migrate_v14_focus_scores(connection: sqlite3.Connection) -> None:
 
     ensure_column(connection, "focus_state_events", "focus_score", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(connection, "focus_reports", "focus_score", "INTEGER NOT NULL DEFAULT 0")
+
+
+def migrate_v15_focus_evidence(connection: sqlite3.Connection) -> None:
+    """Add duration and reliability metadata without rewriting legacy evidence."""
+
+    ensure_column(connection, "focus_state_events", "observed_seconds", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(
+        connection,
+        "focus_state_events",
+        "detector_version",
+        "TEXT NOT NULL DEFAULT 'legacy_unverified'",
+    )
+    ensure_column(connection, "focus_reports", "monitored_seconds", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(connection, "focus_reports", "coverage_ratio", "REAL NOT NULL DEFAULT 0.0")
+    ensure_column(connection, "focus_reports", "classified_ratio", "REAL NOT NULL DEFAULT 0.0")
+    ensure_column(connection, "focus_reports", "focused_seconds", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(connection, "focus_reports", "distracted_seconds", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(connection, "focus_reports", "away_seconds", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(connection, "focus_reports", "unknown_seconds", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(
+        connection,
+        "focus_reports",
+        "evidence_status",
+        "TEXT NOT NULL DEFAULT 'legacy_unverified'",
+    )
+    ensure_column(
+        connection,
+        "focus_reports",
+        "detector_version",
+        "TEXT NOT NULL DEFAULT 'legacy_unverified'",
+    )
 
 
 def rows_to_dicts(rows: List[sqlite3.Row]) -> List[Dict[str, Any]]:
