@@ -1,99 +1,223 @@
+from pathlib import Path
+import sys
+
 import streamlit as st
 
-from config import get_settings
-from db.database import (
-    DEFAULT_SESSION_TITLE,
-    create_chat_session,
-    get_chat_session,
-    get_chat_sessions,
-    get_messages_by_session,
-    init_db,
-    save_message,
-    update_chat_session_title,
-)
-from services.llm_client import LLMClient, LLMConfigError
+SRC_DIR = Path(__file__).resolve().parent / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from kaoyan_agent.core.settings import get_settings
+from kaoyan_agent.db import init_db
+from kaoyan_agent.repositories.conversation_repository import ChatRepository
+
+# from kaoyan_agent.ui.agent_trace_page import render_agent_trace_page
+# from kaoyan_agent.ui.chat_page import render_chat_page
+# from kaoyan_agent.ui.fortune_page import render_fortune_page
+# from kaoyan_agent.ui.memory_system_page import render_memory_system_page
+# from kaoyan_agent.ui.mistake_review_page import render_mistake_review_page
+# from kaoyan_agent.ui.nightly_review_page import render_nightly_page
+# from kaoyan_agent.ui.problem_board_page import render_problem_board_page
+# from kaoyan_agent.ui.score_trend_page import render_score_trend_page
+# from kaoyan_agent.ui.settings_page import render_settings_page
+# from kaoyan_agent.ui.supervision_page import render_supervision_page
+# from kaoyan_agent.ui.task_page import render_task_page
+
+VIEW_LABELS = {
+    "chat": "聊天",
+    "tasks": "今日作战台",
+    "supervision": "督学模式",
+    "mistake_review": "错题复盘",
+    "score_trend": "成绩趋势",
+    "nightly_review": "夜间复盘",
+    "problem_board": "问题看板",
+    "agent_trace": "执行轨迹",
+    "memory_system": "记忆系统",
+    "fortune": "幸运卡",
+    "settings": "设置",
+}
 
 
-def get_recent_chat_messages(session_id, limit=20):
-    messages = get_messages_by_session(session_id, limit=limit)
-    return [
-        {"role": message["role"], "content": message["content"]}
-        for message in messages
-        if message["role"] in {"user", "assistant"}
-    ]
+def set_main_view(view: str) -> None:
+    st.session_state.current_main_view = view
 
 
-def build_session_title(content, max_length=20):
-    title = " ".join(content.strip().split())
-    return title[:max_length] or DEFAULT_SESSION_TITLE
+def ensure_navigation_state() -> None:
+    st.session_state.setdefault("current_main_view", "chat")
+    st.session_state.setdefault("current_chat_session_id", None)
 
 
-def ensure_current_session():
-    session_id = st.session_state.get("current_session_id")
-    if session_id and get_chat_session(session_id):
-        return session_id
-
-    session_id = create_chat_session()
-    st.session_state.current_session_id = session_id
-    return session_id
-
-
-st.set_page_config(page_title="Kaoyan Problem Discovery Agent")
-
-settings = get_settings()
-init_db()
-current_session_id = ensure_current_session()
-current_session = get_chat_session(current_session_id)
-
-st.title("Kaoyan Problem Discovery Agent")
-
-with st.sidebar:
-    st.caption("V0.1.5")
-    st.write(f"Model: `{settings.llm_model}`")
-    st.write(f"Database: `{settings.database_path}`")
-
-    if st.button("新建对话", use_container_width=True):
-        st.session_state.current_session_id = create_chat_session()
+def render_nav_button(label: str, view: str) -> None:
+    if st.button(label, key=f"nav_{view}", use_container_width=True):
+        set_main_view(view)
         st.rerun()
 
+
+def render_sidebar(settings, chat_repository: ChatRepository) -> None:
+    st.title("Kaoyan Agent")
     st.divider()
-    st.subheader("历史对话")
-    for session in get_chat_sessions(limit=30):
-        label = session["title"] or DEFAULT_SESSION_TITLE
-        if session["id"] == current_session_id:
-            label = f"✓ {label}"
-        if st.button(label, key=f"session_{session['id']}", use_container_width=True):
-            st.session_state.current_session_id = session["id"]
-            st.rerun()
 
-messages = get_messages_by_session(current_session_id, limit=50)
-st.caption(current_session["title"] if current_session else DEFAULT_SESSION_TITLE)
+    if st.button("+ 新建聊天", key="new_chat_session", use_container_width=True):
+        session_id = chat_repository.create_session()
+        st.session_state.current_chat_session_id = session_id
+        st.session_state.current_main_view = "chat"
+        st.rerun()
 
-for message in messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    # st.divider()
+    # st.subheader("主入口")
+    render_nav_button(VIEW_LABELS["chat"], "chat")
+    render_nav_button(VIEW_LABELS["tasks"], "tasks")
+    render_nav_button(VIEW_LABELS["fortune"], "fortune")
+    render_nav_button(VIEW_LABELS["settings"], "settings")
 
-prompt = st.chat_input("输入学习问题、复盘内容或当前状态")
+    st.divider()
+    st.subheader("学习干预")
+    render_nav_button(VIEW_LABELS["supervision"], "supervision")
+    render_nav_button(VIEW_LABELS["mistake_review"], "mistake_review")
+    render_nav_button(VIEW_LABELS["score_trend"], "score_trend")
 
-if prompt:
-    save_message(current_session_id, "user", prompt)
-    if current_session and current_session["title"] == DEFAULT_SESSION_TITLE:
-        update_chat_session_title(current_session_id, build_session_title(prompt))
+    st.divider()
+    st.subheader("Agent 诊断")
+    render_nav_button(VIEW_LABELS["agent_trace"], "agent_trace")
+    render_nav_button(VIEW_LABELS["memory_system"], "memory_system")
+    render_nav_button(VIEW_LABELS["problem_board"], "problem_board")
+    render_nav_button(VIEW_LABELS["nightly_review"], "nightly_review")
 
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    st.divider()
+    # st.subheader("更多")
+    # render_nav_button(VIEW_LABELS["fortune"], "fortune")
+    # render_nav_button(VIEW_LABELS["settings"], "settings")
 
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            try:
-                assistant_text = LLMClient(settings).chat(
-                    get_recent_chat_messages(current_session_id, limit=20)
-                )
-            except LLMConfigError as exc:
-                assistant_text = f"LLM is not configured: {exc}"
-            except Exception as exc:
-                assistant_text = f"LLM request failed: {exc}"
+    with st.expander("最近聊天", expanded=False):
+        sessions = chat_repository.list_sessions(limit=12)
+        if sessions:
+            for session in sessions:
+                label = session["title"] or chat_repository.default_session_title
+                if session["id"] == st.session_state.get("current_chat_session_id"):
+                    label = f"* {label}"
+                if st.button(
+                    label, key=f"chat_session_{session['id']}", use_container_width=True
+                ):
+                    st.session_state.current_chat_session_id = int(session["id"])
+                    st.session_state.current_main_view = "chat"
+                    st.rerun()
+        else:
+            st.caption("暂无聊天")
 
-        st.markdown(assistant_text)
+    # st.caption(f"模型：{settings.llm_model}")
+    # st.caption(f"数据库：{settings.database_path}")
 
-    save_message(current_session_id, "assistant", assistant_text)
+
+def render_view(view: str, settings) -> None:
+    """动态导入并渲染对应的页面"""
+    if view == "tasks":
+        from kaoyan_agent.ui.task_page import render_task_page
+
+        render_task_page(settings)
+    elif view == "supervision":
+        from kaoyan_agent.ui.supervision_page import render_supervision_page
+
+        render_supervision_page()
+    elif view == "mistake_review":
+        from kaoyan_agent.ui.mistake_review_page import render_mistake_review_page
+
+        render_mistake_review_page(settings)
+    elif view == "score_trend":
+        from kaoyan_agent.ui.score_trend_page import render_score_trend_page
+
+        render_score_trend_page(settings)
+    elif view == "nightly_review":
+        from kaoyan_agent.ui.nightly_review_page import render_nightly_page
+
+        render_nightly_page(settings)
+    elif view == "problem_board":
+        from kaoyan_agent.ui.problem_board_page import render_problem_board_page
+
+        render_problem_board_page()
+    elif view == "agent_trace":
+        from kaoyan_agent.ui.agent_trace_page import render_agent_trace_page
+
+        render_agent_trace_page()
+    elif view == "memory_system":
+        from kaoyan_agent.ui.memory_system_page import render_memory_system_page
+
+        render_memory_system_page()
+    elif view == "fortune":
+        from kaoyan_agent.ui.fortune_page import render_fortune_page
+
+        render_fortune_page(settings)
+    elif view == "settings":
+        from kaoyan_agent.ui.settings_page import render_settings_page
+
+        render_settings_page(settings)
+    else:  # chat
+        from kaoyan_agent.ui.chat_page import render_chat_page
+
+        render_chat_page(
+            settings=settings,
+            session_id=st.session_state.get("current_chat_session_id"),
+        )
+
+
+def main() -> None:
+    st.set_page_config(page_title="Kaoyan Problem Discovery Agent", layout="wide")
+    settings = get_settings()
+    init_db()
+    ensure_navigation_state()
+
+    chat_repository = ChatRepository()
+    with st.sidebar:
+        render_sidebar(settings, chat_repository)
+
+    current_view = st.session_state.get("current_main_view", "chat")
+    if current_view == "tasks":
+        from kaoyan_agent.ui.task_page import render_task_page
+
+        render_task_page(settings)
+    elif current_view == "supervision":
+        from kaoyan_agent.ui.supervision_page import render_supervision_page
+
+        render_supervision_page()
+    elif current_view == "mistake_review":
+        from kaoyan_agent.ui.mistake_review_page import render_mistake_review_page
+
+        render_mistake_review_page(settings)
+    elif current_view == "score_trend":
+        from kaoyan_agent.ui.score_trend_page import render_score_trend_page
+
+        render_score_trend_page(settings)
+    elif current_view == "nightly_review":
+        from kaoyan_agent.ui.nightly_review_page import render_nightly_page
+
+        render_nightly_page(settings)
+    elif current_view == "problem_board":
+        from kaoyan_agent.ui.problem_board_page import render_problem_board_page
+
+        render_problem_board_page()
+    elif current_view == "agent_trace":
+        from kaoyan_agent.ui.agent_trace_page import render_agent_trace_page
+
+        render_agent_trace_page()
+    elif current_view == "memory_system":
+        from kaoyan_agent.ui.memory_system_page import render_memory_system_page
+
+        render_memory_system_page()
+    elif current_view == "fortune":
+        from kaoyan_agent.ui.fortune_page import render_fortune_page
+
+        render_fortune_page(settings)
+    elif current_view == "settings":
+        from kaoyan_agent.ui.settings_page import render_settings_page
+
+        render_settings_page(settings)
+    else:  # chat
+        from kaoyan_agent.ui.chat_page import render_chat_page
+
+        render_chat_page(
+            settings=settings,
+            session_id=st.session_state.get("current_chat_session_id"),
+        )
+
+
+if __name__ == "__main__":
+    main()

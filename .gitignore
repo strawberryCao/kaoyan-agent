@@ -1,7 +1,74 @@
+# Environment and secrets
 .env
-.venv/
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Local editor and agent state
+.vscode/
+.idea/
+.agents/
+.codex/
+
+# Python caches and build outputs
 __pycache__/
 *.py[cod]
-data/*.db
-data/*.db-*
-data/*.log
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Runtime data, local databases, and indexes
+data/
+!data/.gitkeep
+!data/README.md
+
+# Logs
+*.log
+logs/
+
+# Temporary and generated output
+tmp/
+temp/
+output/
+*.tmp
+*.bak
+*.swp
+
+# ML/model artifacts
+models/**/*.pt
+models/**/*.pth
+models/**/*.ckpt
+models/**/*.onnx
+models/**/*.engine
+weights/
+runs/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local scratch files generated during development/debugging
+check_memory.py
+taskD_*.patch
+taskD_*.txt
+tree_*.txt
+目录树.txt
+
+# Local documentation/export drafts
+docs/

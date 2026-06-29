@@ -1,0 +1,289 @@
+from collections import Counter
+from typing import Any, Dict, List, Optional
+
+from kaoyan_agent.core.settings import Settings, get_settings
+from kaoyan_agent.schemas.focus import (
+    FocusReportOutput,
+    FocusReportNarrativeOutput,
+    FocusStateRecognitionOutput,
+)
+from kaoyan_agent.services.llm_client import (
+    run_structured_agent,
+    run_structured_vision_agent,
+    supports_vision_model,
+)
+from kaoyan_agent.vision.yolo_focus_detector import LocalYoloFocusDetector
+from kaoyan_agent.services.focus_report_calculator import calculate_focus_report
+
+
+ALLOWED_STATES = {"focused", "away", "distracted", "blocked", "unknown"}
+
+VISION_SYSTEM_PROMPT = """
+You are a privacy-aware study supervision classifier.
+Classify only visible study state from the camera snapshot.
+Do not identify the person, infer sensitive attributes, or store image content.
+Allowed state_type values: focused, away, distracted, blocked, unknown.
+Return structured output only.
+""".strip()
+
+REPORT_SYSTEM_PROMPT = """
+You are a study supervision analyst for a Chinese postgraduate exam preparation agent.
+Turn focus session metrics and camera state events into a short report that can
+become problem-discovery evidence. Prefer concrete signals over moral judgment.
+Return structured output only.
+""".strip()
+
+
+class FocusSupervisionAgent:
+    def __init__(self, settings: Optional[Settings] = None):
+        self.settings = settings or get_settings()
+        self._local_detector: Optional[LocalYoloFocusDetector] = None
+
+    def recognize_snapshot(
+        self,
+        image_bytes: bytes,
+        mime_type: str = "image/png",
+        context: str = "",
+    ) -> Dict[str, Any]:
+        fallback = {
+            "state_type": "unknown",
+            "confidence": 0.0,
+            "focus_score": 0,
+            "explanation": "当前视觉识别不可用，已切换为手动状态记录。",
+            "recognition_source": "manual_fallback",
+        }
+        local_result = self.recognize_with_local_model(image_bytes)
+        if local_result:
+            return self.normalize_recognition(local_result, fallback)
+
+        if not supports_vision_model(self.settings):
+            result = self.normalize_recognition(fallback, fallback)
+            result["generation_error"] = (
+                f"Vision is disabled for model {self.settings.llm_model}."
+            )
+            return result
+
+        prompt = (
+            "Classify this camera snapshot for a study supervision session. "
+            "Use one of: focused, away, distracted, blocked, unknown. "
+            f"Optional user context: {context or 'none'}"
+        )
+        try:
+            output = run_structured_vision_agent(
+                FocusStateRecognitionOutput,
+                prompt,
+                image_bytes,
+                mime_type,
+                system_prompt=VISION_SYSTEM_PROMPT,
+                settings=self.settings,
+                temperature=0.0,
+            )
+            return self.normalize_recognition(output.model_dump(), fallback)
+        except Exception as exc:
+            result = self.normalize_recognition(fallback, fallback)
+            result["generation_error"] = str(exc)
+            return result
+
+    def recognize_with_local_model(self, image_bytes: bytes) -> Optional[Dict[str, Any]]:
+        model_path = getattr(self.settings, "focus_local_model_path", None)
+        if not model_path:
+            return None
+        try:
+            if self._local_detector is None:
+                self._local_detector = LocalYoloFocusDetector(
+                    model_path=model_path,
+                    confidence=getattr(self.settings, "focus_local_model_confidence", 0.35),
+                )
+            return self._local_detector.recognize(image_bytes)
+        except Exception:
+            self._local_detector = None
+            return None
+
+    def generate_report(
+        self,
+        session: Dict[str, Any],
+        state_events: List[Dict[str, Any]],
+        timeline_events: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        fallback = self.build_fallback_report(session, state_events)
+        prompt = self.build_report_prompt(session, state_events, timeline_events or [])
+        try:
+            output = run_structured_agent(
+                FocusReportNarrativeOutput,
+                prompt,
+                system_prompt=REPORT_SYSTEM_PROMPT,
+                settings=self.settings,
+                temperature=0.2,
+            )
+            return calculate_focus_report(
+                session,
+                state_events,
+                output.model_dump(),
+                minimum_coverage=getattr(self.settings, "focus_report_min_coverage", 0.8),
+            )
+        except Exception as exc:
+            result = dict(fallback)
+            result["generation_error"] = str(exc)
+            return result
+
+    def normalize_recognition(
+        self,
+        recognition: Dict[str, Any],
+        fallback: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        state_type = str(recognition.get("state_type") or "").strip()
+        if state_type not in ALLOWED_STATES:
+            state_type = fallback["state_type"]
+        normalized = {
+            "state_type": state_type,
+            "confidence": self.clamp_float(
+                recognition.get("confidence"),
+                float(fallback.get("confidence", 0.0)),
+                0.0,
+                1.0,
+            ),
+            "explanation": str(
+                recognition.get("explanation") or fallback["explanation"]
+            ).strip(),
+        }
+        normalized["focus_score"] = self.clamp_int(
+            recognition.get("focus_score"),
+            self.default_focus_score(state_type, normalized["confidence"]),
+            0,
+            100,
+        )
+        if recognition.get("recognition_source"):
+            normalized["recognition_source"] = str(recognition["recognition_source"])
+        if recognition.get("metrics") is not None:
+            normalized["metrics"] = recognition["metrics"]
+        return normalized
+
+    def build_report_prompt(
+        self,
+        session: Dict[str, Any],
+        state_events: List[Dict[str, Any]],
+        timeline_events: List[Dict[str, Any]],
+    ) -> str:
+        return (
+            "Generate only a short narrative for one focus supervision report.\n"
+            f"Session: {session}\n"
+            f"State events: {state_events}\n"
+            f"Timeline events: {timeline_events}\n"
+            "Return only ai_summary, possible_problem_signal, and suggested_action. "
+            "Never invent durations, counts, scores, or unmonitored behavior.\n"
+            "Connect patterns to possible learning problems, for example startup "
+            "difficulty, oversized plan, unclear next action, or execution drift."
+        )
+
+    def build_fallback_report(
+        self,
+        session: Dict[str, Any],
+        state_events: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        return calculate_focus_report(
+            session,
+            state_events,
+            minimum_coverage=getattr(self.settings, "focus_report_min_coverage", 0.8),
+        )
+
+    def normalize_report(
+        self,
+        report: Dict[str, Any],
+        fallback: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return {
+            "focus_score": self.clamp_int(
+                report.get("focus_score"),
+                fallback.get("focus_score", 0),
+                0,
+                100,
+            ),
+            "effective_focus_minutes": self.safe_int(
+                report.get("effective_focus_minutes"),
+                fallback["effective_focus_minutes"],
+            ),
+            "away_count": self.safe_int(report.get("away_count"), fallback["away_count"]),
+            "distracted_count": self.safe_int(
+                report.get("distracted_count"),
+                fallback["distracted_count"],
+            ),
+            "blocked_count": self.safe_int(
+                report.get("blocked_count"),
+                fallback["blocked_count"],
+            ),
+            "longest_focus_minutes": self.safe_int(
+                report.get("longest_focus_minutes"),
+                fallback["longest_focus_minutes"],
+            ),
+            "focus_quality": str(
+                report.get("focus_quality") or fallback["focus_quality"]
+            ).strip(),
+            "ai_summary": str(report.get("ai_summary") or fallback["ai_summary"]).strip(),
+            "possible_problem_signal": str(
+                report.get("possible_problem_signal")
+                or fallback["possible_problem_signal"]
+            ).strip(),
+            "suggested_action": str(
+                report.get("suggested_action") or fallback["suggested_action"]
+            ).strip(),
+        }
+
+    def default_focus_score(self, state_type: str, confidence: float) -> int:
+        confidence_score = round(max(0.0, min(1.0, confidence)) * 100)
+        if state_type == "focused":
+            return confidence_score
+        if state_type == "distracted":
+            return max(0, round((1.0 - confidence) * 40))
+        if state_type in {"away", "blocked"}:
+            return 0
+        return 0
+
+    def session_focus_score(self, state_events: List[Dict[str, Any]]) -> int:
+        if not state_events:
+            return 0
+
+        scores = []
+        for event in state_events:
+            if event.get("focus_score") is not None:
+                scores.append(self.clamp_int(event.get("focus_score"), 0, 0, 100))
+                continue
+            state_type = str(event.get("state_type") or "unknown")
+            default_confidence = (
+                1.0 if state_type in {"focused", "distracted", "away", "blocked"} else 0.0
+            )
+            confidence = self.clamp_float(event.get("confidence"), default_confidence, 0.0, 1.0)
+            scores.append(self.default_focus_score(state_type, confidence))
+
+        return round(sum(scores) / max(len(scores), 1))
+
+    def safe_int(self, value: Any, default: int = 0) -> int:
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return max(0, default)
+
+    def clamp_int(
+        self,
+        value: Any,
+        default: int,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        try:
+            number = int(round(float(value)))
+        except (TypeError, ValueError):
+            number = int(default)
+        return max(minimum, min(maximum, number))
+
+    def clamp_float(
+        self,
+        value: Any,
+        default: float,
+        minimum: float,
+        maximum: float,
+    ) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            number = default
+        return max(minimum, min(maximum, number))
