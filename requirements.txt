@@ -1,19 +1,26 @@
-﻿# Runtime dependencies
+# Core app
 streamlit>=1.32
-openai>=1.0
 python-dotenv>=1.0
 pydantic>=2
+
+# LLM and agent runtime
+openai>=1.0
 langchain>=1.0
+langchain-core>=1.0
 langchain-deepseek>=0.1
 langchain-openai>=1.0
+
+# Memory backends
 chromadb>=0.5
 neo4j>=5.20
+
+# Focus supervision and vision
 streamlit-webrtc>=0.47
 opencv-python>=4.9
+Pillow>=10
 ultralytics>=8.3
 mediapipe>=0.10.14; python_version < "3.13"
 
-# Build tools required by pyproject.toml for editable installs.
+# Editable install build backend
 setuptools>=68
 wheel
-

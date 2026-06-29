@@ -9,6 +9,7 @@
 .idea/
 .agents/
 .codex/
+AGENTS.md
 
 # Python caches and build outputs
 __pycache__/
@@ -47,13 +48,12 @@ output/
 *.swp
 
 # ML/model artifacts
-models/**/*.pt
-models/**/*.pth
-models/**/*.ckpt
-models/**/*.onnx
-models/**/*.engine
+models/
 weights/
 runs/
+
+# Tool-specific generated lock files
+uv.lock
 
 # Notebook checkpoints
 .ipynb_checkpoints/

@@ -32,7 +32,6 @@ Python 依赖定义在：
 
 - `pyproject.toml`
 - `requirements.txt`
-- `uv.lock`
 
 安装依赖：
 
