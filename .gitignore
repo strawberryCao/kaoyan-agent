@@ -1,36 +1,74 @@
+# Environment and secrets
 .env
+.env.*
+!.env.example
 .streamlit/secrets.toml
-.venv/
+
+# Local editor and agent state
+.vscode/
+.idea/
+.agents/
+.codex/
+
+# Python caches and build outputs
 __pycache__/
 *.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
 *.egg-info/
 
-# Runtime data and local indexes
-data/*.db
-data/*.db-*
-data/*.log
-data/chroma/
-data/neo4j/
-data/neo4j-logs/
-data/**/*.sqlite
-data/**/*.sqlite-*
+# Virtual environments
+.venv/
+venv/
+env/
 
-# Model artifacts: keep the formal demo YOLO weight, ignore other binaries.
+# Runtime data, local databases, and indexes
+data/
+!data/.gitkeep
+!data/README.md
+
+# Logs
+*.log
+logs/
+
+# Temporary and generated output
+tmp/
+temp/
+output/
+*.tmp
+*.bak
+*.swp
+
+# ML/model artifacts
 models/**/*.pt
 models/**/*.pth
 models/**/*.ckpt
 models/**/*.onnx
 models/**/*.engine
-!models/focus_state_v1_pilot/
-!models/focus_state_v1_pilot/best.pt
-!models/person_presence/
-!models/person_presence/yolov8n.pt
 weights/
 runs/
 
-# Local scratch files generated during integration/debugging.
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local scratch files generated during development/debugging
 check_memory.py
 taskD_*.patch
 taskD_*.txt
 tree_*.txt
 目录树.txt
+
+# Local documentation/export drafts
+docs/
