@@ -1,0 +1,1328 @@
+diff --git a/app.py b/app.py
+index 40d1e55..afd8b3a 100644
+--- a/app.py
++++ b/app.py
+@@ -38,7 +38,7 @@ def ensure_current_session():
+     return session_id
+ 
+ 
+-st.set_page_config(page_title="Kaoyan Problem Discovery Agent")
++st.set_page_config(page_title="Kaoyan Problem Discovery Agent", page_icon="💬")
+ 
+ settings = get_settings()
+ init_db()
+@@ -46,6 +46,7 @@ current_session_id = ensure_current_session()
+ current_session = get_chat_session(current_session_id)
+ 
+ st.title("Kaoyan Problem Discovery Agent")
++st.caption("对话首页 · 侧边栏可切换到「今日作战台」「督学模式」「专注统计」")
+ 
+ with st.sidebar:
+     st.caption("V0.1.5")
+diff --git a/db/schema.sql b/db/schema.sql
+index f12e944..0efe9a5 100644
+--- a/db/schema.sql
++++ b/db/schema.sql
+@@ -20,3 +20,53 @@ ON chat_sessions (updated_at);
+ 
+ CREATE INDEX IF NOT EXISTS idx_conversations_created_at
+ ON conversations (created_at);
++
++CREATE TABLE IF NOT EXISTS daily_plans (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    plan_date TEXT NOT NULL UNIQUE,
++    created_at TEXT NOT NULL,
++    updated_at TEXT NOT NULL
++);
++
++CREATE TABLE IF NOT EXISTS daily_tasks (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    plan_id INTEGER NOT NULL,
++    subject TEXT NOT NULL DEFAULT '',
++    task TEXT NOT NULL,
++    reason TEXT NOT NULL DEFAULT '',
++    estimated_minutes INTEGER NOT NULL DEFAULT 25,
++    related_problem_id TEXT NOT NULL DEFAULT '',
++    status TEXT NOT NULL DEFAULT 'pending'
++        CHECK (status IN ('pending', 'in_progress', 'done')),
++    created_at TEXT NOT NULL,
++    updated_at TEXT NOT NULL,
++    FOREIGN KEY (plan_id) REFERENCES daily_plans(id) ON DELETE CASCADE
++);
++
++CREATE INDEX IF NOT EXISTS idx_daily_tasks_plan_id
++ON daily_tasks (plan_id);
++
++CREATE INDEX IF NOT EXISTS idx_daily_tasks_status
++ON daily_tasks (status);
++
++CREATE TABLE IF NOT EXISTS focus_sessions (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    task_id INTEGER,
++    task_title TEXT NOT NULL,
++    subject TEXT NOT NULL DEFAULT '',
++    planned_minutes INTEGER NOT NULL,
++    actual_seconds INTEGER NOT NULL DEFAULT 0,
++    pause_count INTEGER NOT NULL DEFAULT 0,
++    started_at TEXT NOT NULL,
++    ended_at TEXT,
++    completed INTEGER NOT NULL DEFAULT 0,
++    reflection TEXT NOT NULL DEFAULT '',
++    created_at TEXT NOT NULL,
++    FOREIGN KEY (task_id) REFERENCES daily_tasks(id) ON DELETE SET NULL
++);
++
++CREATE INDEX IF NOT EXISTS idx_focus_sessions_started_at
++ON focus_sessions (started_at);
++
++CREATE INDEX IF NOT EXISTS idx_focus_sessions_task_id
++ON focus_sessions (task_id);
+diff --git a/pages/1_今日作战台.py b/pages/1_今日作战台.py
+new file mode 100644
+index 0000000..252ac53
+--- /dev/null
++++ b/pages/1_今日作战台.py
+@@ -0,0 +1,8 @@
++import streamlit as st
++
++from db.database import init_db
++from ui.battle_station_page import render_battle_station_page
++
++st.set_page_config(page_title="今日作战台", page_icon="📋")
++init_db()
++render_battle_station_page()
+diff --git a/pages/2_督学模式.py b/pages/2_督学模式.py
+new file mode 100644
+index 0000000..8a394a0
+--- /dev/null
++++ b/pages/2_督学模式.py
+@@ -0,0 +1,8 @@
++import streamlit as st
++
++from db.database import init_db
++from ui.focus_timer_page import render_focus_timer_page
++
++st.set_page_config(page_title="督学模式", page_icon="🍅")
++init_db()
++render_focus_timer_page()
+diff --git a/pages/3_专注统计.py b/pages/3_专注统计.py
+new file mode 100644
+index 0000000..224ac59
+--- /dev/null
++++ b/pages/3_专注统计.py
+@@ -0,0 +1,8 @@
++import streamlit as st
++
++from db.database import init_db
++from ui.focus_stats_page import render_focus_stats_page
++
++st.set_page_config(page_title="专注统计", page_icon="📊")
++init_db()
++render_focus_stats_page()
+diff --git a/repositories/__init__.py b/repositories/__init__.py
+new file mode 100644
+index 0000000..562f0b2
+--- /dev/null
++++ b/repositories/__init__.py
+@@ -0,0 +1,4 @@
++from repositories.focus_session_repository import FocusSessionRepository
++from repositories.task_repository import TaskRepository
++
++__all__ = ["FocusSessionRepository", "TaskRepository"]
+diff --git a/repositories/focus_session_repository.py b/repositories/focus_session_repository.py
+new file mode 100644
+index 0000000..be3174b
+--- /dev/null
++++ b/repositories/focus_session_repository.py
+@@ -0,0 +1,218 @@
++from contextlib import closing
++from datetime import date, datetime, timedelta, timezone
++from typing import List, Optional
++
++from db.database import get_connection, utc_now
++from schemas.focus_session import (
++    FocusSessionCreate,
++    FocusSessionFinish,
++    FocusSessionRecord,
++    FocusStats,
++)
++from schemas.task import DailyTaskStatus
++
++
++class FocusSessionRepository:
++    def create_session(self, payload: FocusSessionCreate, started_at: str) -> int:
++        now = utc_now()
++        with closing(get_connection()) as connection:
++            cursor = connection.execute(
++                """
++                INSERT INTO focus_sessions (
++                    task_id, task_title, subject, planned_minutes,
++                    actual_seconds, pause_count, started_at, ended_at,
++                    completed, reflection, created_at
++                )
++                VALUES (?, ?, ?, ?, 0, 0, ?, NULL, 0, '', ?)
++                """,
++                (
++                    payload.task_id,
++                    payload.task_title,
++                    payload.subject,
++                    payload.planned_minutes,
++                    started_at,
++                    now,
++                ),
++            )
++            connection.commit()
++            return int(cursor.lastrowid)
++
++    def finish_session(
++        self,
++        session_id: int,
++        payload: FocusSessionFinish,
++        ended_at: str,
++    ) -> FocusSessionRecord:
++        with closing(get_connection()) as connection:
++            connection.execute(
++                """
++                UPDATE focus_sessions
++                SET actual_seconds = ?,
++                    pause_count = ?,
++                    ended_at = ?,
++                    completed = ?,
++                    reflection = ?
++                WHERE id = ?
++                """,
++                (
++                    payload.actual_seconds,
++                    payload.pause_count,
++                    ended_at,
++                    int(payload.completed),
++                    payload.reflection.strip(),
++                    session_id,
++                ),
++            )
++            connection.commit()
++
++        record = self.get_session_by_id(session_id)
++        if record is None:
++            raise RuntimeError(f"Failed to load focus session {session_id}")
++        return record
++
++    def get_session_by_id(self, session_id: int) -> Optional[FocusSessionRecord]:
++        with closing(get_connection()) as connection:
++            row = connection.execute(
++                """
++                SELECT
++                    id, task_id, task_title, subject, planned_minutes,
++                    actual_seconds, pause_count, started_at, ended_at,
++                    completed, reflection, created_at
++                FROM focus_sessions
++                WHERE id = ?
++                """,
++                (session_id,),
++            ).fetchone()
++        return self._row_to_record(row) if row else None
++
++    def list_recent_sessions(self, limit: int = 20) -> List[FocusSessionRecord]:
++        with closing(get_connection()) as connection:
++            rows = connection.execute(
++                """
++                SELECT
++                    id, task_id, task_title, subject, planned_minutes,
++                    actual_seconds, pause_count, started_at, ended_at,
++                    completed, reflection, created_at
++                FROM focus_sessions
++                WHERE ended_at IS NOT NULL
++                ORDER BY ended_at DESC, id DESC
++                LIMIT ?
++                """,
++                (limit,),
++            ).fetchall()
++        return [self._row_to_record(row) for row in rows]
++
++    def list_sessions_by_date(self, plan_date: str) -> List[FocusSessionRecord]:
++        with closing(get_connection()) as connection:
++            rows = connection.execute(
++                """
++                SELECT
++                    id, task_id, task_title, subject, planned_minutes,
++                    actual_seconds, pause_count, started_at, ended_at,
++                    completed, reflection, created_at
++                FROM focus_sessions
++                WHERE ended_at IS NOT NULL
++                  AND date(started_at) = ?
++                ORDER BY started_at DESC, id DESC
++                """,
++                (plan_date,),
++            ).fetchall()
++        return [self._row_to_record(row) for row in rows]
++
++    def get_stats(self) -> FocusStats:
++        today = date.today().isoformat()
++        week_start = (date.today() - timedelta(days=6)).isoformat()
++
++        with closing(get_connection()) as connection:
++            today_rows = connection.execute(
++                """
++                SELECT actual_seconds, completed
++                FROM focus_sessions
++                WHERE ended_at IS NOT NULL
++                  AND date(started_at) = ?
++                """,
++                (today,),
++            ).fetchall()
++
++            week_rows = connection.execute(
++                """
++                SELECT actual_seconds, completed
++                FROM focus_sessions
++                WHERE ended_at IS NOT NULL
++                  AND date(started_at) >= ?
++                """,
++                (week_start,),
++            ).fetchall()
++
++            total_rows = connection.execute(
++                """
++                SELECT actual_seconds, completed
++                FROM focus_sessions
++                WHERE ended_at IS NOT NULL
++                """
++            ).fetchall()
++
++            daily_rows = connection.execute(
++                """
++                SELECT date(started_at) AS day, SUM(actual_seconds) AS total_seconds
++                FROM focus_sessions
++                WHERE ended_at IS NOT NULL
++                  AND date(started_at) >= ?
++                GROUP BY date(started_at)
++                ORDER BY day ASC
++                """,
++                (week_start,),
++            ).fetchall()
++
++        def summarize(rows):
++            sessions = len(rows)
++            minutes = round(sum(int(row["actual_seconds"]) for row in rows) / 60, 1)
++            completed = sum(1 for row in rows if int(row["completed"]) == 1)
++            return sessions, minutes, completed
++
++        today_sessions, today_minutes, today_completed = summarize(today_rows)
++        week_sessions, week_minutes, week_completed = summarize(week_rows)
++        total_sessions, total_minutes, total_completed = summarize(total_rows)
++
++        completion_rate = 0.0
++        if total_sessions:
++            completion_rate = round(total_completed / total_sessions * 100, 1)
++
++        daily_minutes = {
++            row["day"]: round(int(row["total_seconds"]) / 60, 1)
++            for row in daily_rows
++        }
++
++        return FocusStats(
++            today_sessions=today_sessions,
++            today_focus_minutes=today_minutes,
++            today_completed=today_completed,
++            week_sessions=week_sessions,
++            week_focus_minutes=week_minutes,
++            week_completed=week_completed,
++            total_sessions=total_sessions,
++            total_focus_minutes=total_minutes,
++            completion_rate=completion_rate,
++            daily_minutes=daily_minutes,
++        )
++
++    def list_all_for_review(self, limit: int = 100) -> List[FocusSessionRecord]:
++        """供成员2夜间复盘读取专注记录。"""
++        return self.list_recent_sessions(limit=limit)
++
++    @staticmethod
++    def _row_to_record(row) -> FocusSessionRecord:
++        return FocusSessionRecord(
++            id=int(row["id"]),
++            task_id=int(row["task_id"]) if row["task_id"] is not None else None,
++            task_title=row["task_title"],
++            subject=row["subject"],
++            planned_minutes=int(row["planned_minutes"]),
++            actual_seconds=int(row["actual_seconds"]),
++            pause_count=int(row["pause_count"]),
++            started_at=row["started_at"],
++            ended_at=row["ended_at"],
++            completed=bool(int(row["completed"])),
++            reflection=row["reflection"],
++            created_at=row["created_at"],
++        )
+diff --git a/repositories/task_repository.py b/repositories/task_repository.py
+new file mode 100644
+index 0000000..f1cd3ce
+--- /dev/null
++++ b/repositories/task_repository.py
+@@ -0,0 +1,156 @@
++from contextlib import closing
++from datetime import date
++from typing import List, Optional
++
++from db.database import get_connection, utc_now
++from schemas.task import DailyTaskCreate, DailyTaskRecord, DailyTaskStatus
++
++
++class TaskRepository:
++    def _today_str(self) -> str:
++        return date.today().isoformat()
++
++    def ensure_today_plan(self) -> int:
++        plan_date = self._today_str()
++        now = utc_now()
++        with closing(get_connection()) as connection:
++            row = connection.execute(
++                "SELECT id FROM daily_plans WHERE plan_date = ?",
++                (plan_date,),
++            ).fetchone()
++            if row:
++                return int(row["id"])
++
++            cursor = connection.execute(
++                """
++                INSERT INTO daily_plans (plan_date, created_at, updated_at)
++                VALUES (?, ?, ?)
++                """,
++                (plan_date, now, now),
++            )
++            connection.commit()
++            return int(cursor.lastrowid)
++
++    def create_task(self, payload: DailyTaskCreate) -> DailyTaskRecord:
++        plan_id = self.ensure_today_plan()
++        now = utc_now()
++        with closing(get_connection()) as connection:
++            cursor = connection.execute(
++                """
++                INSERT INTO daily_tasks (
++                    plan_id, subject, task, reason, estimated_minutes,
++                    related_problem_id, status, created_at, updated_at
++                )
++                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
++                """,
++                (
++                    plan_id,
++                    payload.subject.strip(),
++                    payload.task.strip(),
++                    payload.reason.strip(),
++                    payload.estimated_minutes,
++                    payload.related_problem_id.strip(),
++                    DailyTaskStatus.PENDING.value,
++                    now,
++                    now,
++                ),
++            )
++            connection.commit()
++            task_id = int(cursor.lastrowid)
++
++        task = self.get_task_by_id(task_id)
++        if task is None:
++            raise RuntimeError(f"Failed to load task {task_id}")
++        return task
++
++    def list_today_tasks(self) -> List[DailyTaskRecord]:
++        plan_date = self._today_str()
++        with closing(get_connection()) as connection:
++            rows = connection.execute(
++                """
++                SELECT
++                    t.id, t.plan_id, t.subject, t.task, t.reason,
++                    t.estimated_minutes, t.related_problem_id, t.status,
++                    t.created_at, t.updated_at
++                FROM daily_tasks t
++                JOIN daily_plans p ON p.id = t.plan_id
++                WHERE p.plan_date = ?
++                ORDER BY
++                    CASE t.status
++                        WHEN 'in_progress' THEN 0
++                        WHEN 'pending' THEN 1
++                        ELSE 2
++                    END,
++                    t.id ASC
++                """,
++                (plan_date,),
++            ).fetchall()
++        return [self._row_to_record(row) for row in rows]
++
++    def get_task_by_id(self, task_id: int) -> Optional[DailyTaskRecord]:
++        with closing(get_connection()) as connection:
++            row = connection.execute(
++                """
++                SELECT
++                    id, plan_id, subject, task, reason, estimated_minutes,
++                    related_problem_id, status, created_at, updated_at
++                FROM daily_tasks
++                WHERE id = ?
++                """,
++                (task_id,),
++            ).fetchone()
++        return self._row_to_record(row) if row else None
++
++    def update_task_status(self, task_id: int, status: DailyTaskStatus) -> None:
++        with closing(get_connection()) as connection:
++            connection.execute(
++                """
++                UPDATE daily_tasks
++                SET status = ?, updated_at = ?
++                WHERE id = ?
++                """,
++                (status.value, utc_now(), task_id),
++            )
++            connection.commit()
++
++    def seed_demo_tasks_if_empty(self) -> None:
++        if self.list_today_tasks():
++            return
++
++        demo_tasks = [
++            DailyTaskCreate(
++                subject="数学",
++                task="高数极限与连续复习",
++                reason="昨日错题未消化",
++                estimated_minutes=25,
++            ),
++            DailyTaskCreate(
++                subject="408",
++                task="操作系统进程调度刷题",
++                reason="计划内任务",
++                estimated_minutes=25,
++            ),
++            DailyTaskCreate(
++                subject="英语",
++                task="阅读理解精读 2 篇",
++                reason="保持语感",
++                estimated_minutes=30,
++            ),
++        ]
++        for task in demo_tasks:
++            self.create_task(task)
++
++    @staticmethod
++    def _row_to_record(row) -> DailyTaskRecord:
++        return DailyTaskRecord(
++            id=int(row["id"]),
++            plan_id=int(row["plan_id"]),
++            subject=row["subject"],
++            task=row["task"],
++            reason=row["reason"],
++            estimated_minutes=int(row["estimated_minutes"]),
++            related_problem_id=row["related_problem_id"],
++            status=DailyTaskStatus(row["status"]),
++            created_at=row["created_at"],
++            updated_at=row["updated_at"],
++        )
+diff --git a/requirements.txt b/requirements.txt
+index 810471c..92cf453 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,3 +1,4 @@
+ streamlit>=1.32
+ openai>=1.0
+ python-dotenv>=1.0
++pydantic>=2.0
+diff --git a/schemas/__init__.py b/schemas/__init__.py
+new file mode 100644
+index 0000000..7fffb28
+--- /dev/null
++++ b/schemas/__init__.py
+@@ -0,0 +1,19 @@
++from schemas.focus_session import (
++    FocusSessionCreate,
++    FocusSessionFinish,
++    FocusSessionRecord,
++    FocusStats,
++    FocusTimerState,
++)
++from schemas.task import DailyTaskCreate, DailyTaskRecord, DailyTaskStatus
++
++__all__ = [
++    "DailyTaskCreate",
++    "DailyTaskRecord",
++    "DailyTaskStatus",
++    "FocusSessionCreate",
++    "FocusSessionFinish",
++    "FocusSessionRecord",
++    "FocusStats",
++    "FocusTimerState",
++]
+diff --git a/schemas/focus_session.py b/schemas/focus_session.py
+new file mode 100644
+index 0000000..9b3d6d8
+--- /dev/null
++++ b/schemas/focus_session.py
+@@ -0,0 +1,69 @@
++from enum import Enum
++from typing import Optional
++
++from pydantic import BaseModel, Field
++
++
++class FocusTimerStatus(str, Enum):
++    IDLE = "idle"
++    RUNNING = "running"
++    PAUSED = "paused"
++    FINISHED = "finished"
++
++
++class FocusSessionCreate(BaseModel):
++    task_id: Optional[int] = None
++    task_title: str
++    subject: str = ""
++    planned_minutes: int = Field(ge=1, le=480)
++
++
++class FocusSessionFinish(BaseModel):
++    actual_seconds: int = Field(ge=0)
++    pause_count: int = Field(ge=0, default=0)
++    completed: bool = False
++    reflection: str = ""
++
++
++class FocusSessionRecord(BaseModel):
++    id: int
++    task_id: Optional[int]
++    task_title: str
++    subject: str
++    planned_minutes: int
++    actual_seconds: int
++    pause_count: int
++    started_at: str
++    ended_at: Optional[str]
++    completed: bool
++    reflection: str
++    created_at: str
++
++    @property
++    def actual_minutes(self) -> float:
++        return round(self.actual_seconds / 60, 1)
++
++
++class FocusStats(BaseModel):
++    today_sessions: int = 0
++    today_focus_minutes: float = 0.0
++    today_completed: int = 0
++    week_sessions: int = 0
++    week_focus_minutes: float = 0.0
++    week_completed: int = 0
++    total_sessions: int = 0
++    total_focus_minutes: float = 0.0
++    completion_rate: float = 0.0
++    daily_minutes: dict[str, float] = Field(default_factory=dict)
++
++
++class FocusTimerState(BaseModel):
++    task_id: Optional[int] = None
++    task_title: str = ""
++    subject: str = ""
++    planned_minutes: int = 25
++    status: FocusTimerStatus = FocusTimerStatus.IDLE
++    session_started_at: Optional[str] = None
++    segment_started_at: Optional[str] = None
++    accumulated_seconds: int = 0
++    pause_count: int = 0
+diff --git a/schemas/task.py b/schemas/task.py
+new file mode 100644
+index 0000000..69d6d36
+--- /dev/null
++++ b/schemas/task.py
+@@ -0,0 +1,37 @@
++from enum import Enum
++from typing import Optional
++
++from pydantic import BaseModel, Field
++
++
++class DailyTaskStatus(str, Enum):
++    PENDING = "pending"
++    IN_PROGRESS = "in_progress"
++    DONE = "done"
++
++
++class DailyTaskCreate(BaseModel):
++    subject: str = ""
++    task: str
++    reason: str = ""
++    estimated_minutes: int = Field(default=25, ge=1, le=480)
++    related_problem_id: str = ""
++
++
++class DailyTaskRecord(BaseModel):
++    id: int
++    plan_id: int
++    subject: str
++    task: str
++    reason: str
++    estimated_minutes: int
++    related_problem_id: str
++    status: DailyTaskStatus
++    created_at: str
++    updated_at: str
++
++    @property
++    def display_title(self) -> str:
++        if self.subject:
++            return f"{self.subject} · {self.task}"
++        return self.task
+diff --git a/scripts/test_focus_timer.py b/scripts/test_focus_timer.py
+new file mode 100644
+index 0000000..2a68d96
+--- /dev/null
++++ b/scripts/test_focus_timer.py
+@@ -0,0 +1,60 @@
++from db.database import init_db, get_connection
++from workflows.daily_task_workflow import DailyTaskWorkflow
++from workflows.focus_timer_workflow import FocusTimerWorkflow
++from schemas.task import DailyTaskCreate
++
++
++class FakeSession:
++    def __init__(self):
++        self._data = {}
++
++    def get(self, key, default=None):
++        return self._data.get(key, default)
++
++    def __setitem__(self, key, value):
++        self._data[key] = value
++
++    def pop(self, key, default=None):
++        return self._data.pop(key, default)
++
++
++def main() -> None:
++    init_db()
++
++    task_workflow = DailyTaskWorkflow()
++    task = task_workflow.add_task(
++        DailyTaskCreate(subject="数学", task="测试任务", estimated_minutes=25)
++    )
++    print("Created task:", task.id, task.display_title)
++
++    session_state = FakeSession()
++    focus_workflow = FocusTimerWorkflow()
++    focus_workflow.prepare_from_task(session_state, task.id)
++    focus_workflow.start_timer(session_state)
++    focus_workflow.pause_timer(session_state)
++    focus_workflow.resume_timer(session_state)
++    record = focus_workflow.end_timer(session_state, reflection="测试心得")
++    print(
++        "Finished:",
++        record.actual_seconds,
++        record.completed,
++        record.reflection,
++    )
++
++    stats = focus_workflow.get_stats()
++    print("Stats:", stats.today_sessions, stats.today_focus_minutes)
++
++    with get_connection() as connection:
++        tables = [
++            row[0]
++            for row in connection.execute(
++                "SELECT name FROM sqlite_master WHERE type='table'"
++            ).fetchall()
++        ]
++        print("Tables:", tables)
++
++    print("ALL OK")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/ui/__init__.py b/ui/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/ui/battle_station_page.py b/ui/battle_station_page.py
+new file mode 100644
+index 0000000..299429a
+--- /dev/null
++++ b/ui/battle_station_page.py
+@@ -0,0 +1,79 @@
++import streamlit as st
++
++from schemas.task import DailyTaskCreate, DailyTaskStatus
++from workflows.daily_task_workflow import DailyTaskWorkflow
++from workflows.focus_timer_workflow import FocusTimerWorkflow
++from ui.focus_helpers import PENDING_FOCUS_TASK_ID_KEY
++
++
++def render_battle_station_page() -> None:
++    st.title("今日作战台")
++    st.caption("选择今日任务，点击「开始督学」进入专注计时。")
++
++    workflow = DailyTaskWorkflow()
++    tasks = workflow.get_today_tasks(seed_demo=True)
++
++    with st.expander("添加任务", expanded=not tasks):
++        with st.form("add_daily_task_form", clear_on_submit=True):
++            col1, col2 = st.columns(2)
++            with col1:
++                subject = st.text_input("科目", placeholder="例如：数学")
++                task = st.text_input("任务内容", placeholder="例如：高数极限复习")
++            with col2:
++                estimated_minutes = st.number_input(
++                    "计划时长（分钟）",
++                    min_value=5,
++                    max_value=180,
++                    value=25,
++                    step=5,
++                )
++                reason = st.text_input("原因/备注", placeholder="可选")
++            submitted = st.form_submit_button("添加任务", use_container_width=True)
++            if submitted:
++                if not task.strip():
++                    st.error("请填写任务内容")
++                else:
++                    workflow.add_task(
++                        DailyTaskCreate(
++                            subject=subject.strip(),
++                            task=task.strip(),
++                            reason=reason.strip(),
++                            estimated_minutes=int(estimated_minutes),
++                        )
++                    )
++                    st.success("任务已添加")
++                    st.rerun()
++
++    if not tasks:
++        st.info("今天还没有任务，请先添加一个。")
++        return
++
++    st.subheader("今日任务")
++    status_labels = {
++        DailyTaskStatus.PENDING: "待开始",
++        DailyTaskStatus.IN_PROGRESS: "进行中",
++        DailyTaskStatus.DONE: "已完成",
++    }
++
++    for task in tasks:
++        with st.container(border=True):
++            col_info, col_action = st.columns([3, 1])
++            with col_info:
++                st.markdown(f"**{task.display_title}**")
++                st.caption(
++                    f"计划 {task.estimated_minutes} 分钟 · "
++                    f"状态：{status_labels[task.status]}"
++                )
++                if task.reason:
++                    st.write(task.reason)
++            with col_action:
++                if st.button(
++                    "开始督学",
++                    key=f"start_focus_{task.id}",
++                    use_container_width=True,
++                    type="primary",
++                ):
++                    timer_workflow = FocusTimerWorkflow()
++                    timer_workflow.prepare_from_task(st.session_state, task.id)
++                    st.session_state[PENDING_FOCUS_TASK_ID_KEY] = task.id
++                    st.switch_page("pages/2_督学模式.py")
+diff --git a/ui/focus_helpers.py b/ui/focus_helpers.py
+new file mode 100644
+index 0000000..c8832d5
+--- /dev/null
++++ b/ui/focus_helpers.py
+@@ -0,0 +1,9 @@
++PENDING_FOCUS_TASK_ID_KEY = "pending_focus_task_id"
++
++
++def format_duration(seconds: int) -> str:
++    minutes, secs = divmod(max(seconds, 0), 60)
++    hours, minutes = divmod(minutes, 60)
++    if hours:
++        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
++    return f"{minutes:02d}:{secs:02d}"
+diff --git a/ui/focus_stats_page.py b/ui/focus_stats_page.py
+new file mode 100644
+index 0000000..e54a6da
+--- /dev/null
++++ b/ui/focus_stats_page.py
+@@ -0,0 +1,76 @@
++from datetime import datetime
++
++import streamlit as st
++
++from workflows.focus_timer_workflow import FocusTimerWorkflow
++from ui.focus_helpers import format_duration
++
++
++def render_focus_stats_page() -> None:
++    st.title("专注统计")
++    st.caption("查看督学记录与专注趋势，供每日复盘参考。")
++
++    workflow = FocusTimerWorkflow()
++    stats = workflow.get_stats()
++    recent_sessions = workflow.list_recent_sessions(limit=15)
++
++    col1, col2, col3, col4 = st.columns(4)
++    col1.metric("今日专注", f"{stats.today_focus_minutes} 分钟")
++    col2.metric("今日次数", stats.today_sessions)
++    col3.metric("本周专注", f"{stats.week_focus_minutes} 分钟")
++    col4.metric("完成率", f"{stats.completion_rate}%")
++
++    st.divider()
++
++    left, right = st.columns([1, 1])
++    with left:
++        st.subheader("近 7 日专注时长")
++        if stats.daily_minutes:
++            chart_data = {
++                day: minutes for day, minutes in stats.daily_minutes.items()
++            }
++            st.bar_chart(chart_data)
++        else:
++            st.info("暂无数据，完成一次督学后会在这里显示。")
++
++    with right:
++        st.subheader("累计概览")
++        st.write(f"- 总督学次数：**{stats.total_sessions}**")
++        st.write(f"- 总专注时长：**{stats.total_focus_minutes} 分钟**")
++        st.write(f"- 本周完成：**{stats.week_completed} / {stats.week_sessions}**")
++        st.write(f"- 今日完成：**{stats.today_completed} / {stats.today_sessions}**")
++
++    st.divider()
++    st.subheader("最近督学记录")
++
++    if not recent_sessions:
++        st.info("还没有督学记录。去「今日作战台」选任务开始吧。")
++        return
++
++    for session in recent_sessions:
++        with st.container(border=True):
++            title = session.task_title
++            if session.subject and session.subject not in title:
++                title = f"{session.subject} · {title}"
++
++            started = _format_time(session.started_at)
++            ended = _format_time(session.ended_at) if session.ended_at else "-"
++            completed_label = "已完成" if session.completed else "未完成"
++
++            st.markdown(f"**{title}**")
++            st.caption(
++                f"{started} → {ended} · "
++                f"计划 {session.planned_minutes} 分钟 · "
++                f"实际 {session.actual_minutes} 分钟 · "
++                f"暂停 {session.pause_count} 次 · {completed_label}"
++            )
++            if session.reflection:
++                st.write(f"心得：{session.reflection}")
++
++
++def _format_time(iso_text: str) -> str:
++    try:
++        dt = datetime.fromisoformat(iso_text)
++        return dt.strftime("%m-%d %H:%M")
++    except ValueError:
++        return iso_text
+diff --git a/ui/focus_timer_page.py b/ui/focus_timer_page.py
+new file mode 100644
+index 0000000..8aa4226
+--- /dev/null
++++ b/ui/focus_timer_page.py
+@@ -0,0 +1,171 @@
++from datetime import timedelta
++
++import streamlit as st
++
++from schemas.focus_session import FocusTimerStatus
++from workflows.focus_timer_workflow import FocusTimerWorkflow
++from ui.focus_helpers import PENDING_FOCUS_TASK_ID_KEY, format_duration
++
++
++def render_focus_timer_page() -> None:
++    st.title("督学模式")
++    st.caption("专注计时 · 暂停可恢复 · 结束后自动保存学习记录")
++
++    workflow = FocusTimerWorkflow()
++    pending_task_id = st.session_state.pop(PENDING_FOCUS_TASK_ID_KEY, None)
++    if pending_task_id is not None:
++        try:
++            workflow.prepare_from_task(st.session_state, int(pending_task_id))
++        except ValueError as exc:
++            st.error(str(exc))
++
++    state = workflow.get_timer_state(st.session_state)
++
++    if not state.task_title:
++        st.warning("请先在「今日作战台」选择一个任务，再点击「开始督学」。")
++        if st.button("前往今日作战台", use_container_width=True):
++            st.switch_page("pages/1_今日作战台.py")
++        return
++
++    elapsed_seconds = workflow.get_elapsed_seconds(state)
++    remaining_seconds = workflow.get_remaining_seconds(state)
++    planned_seconds = state.planned_minutes * 60
++
++    col_task, col_plan = st.columns(2)
++    with col_task:
++        st.metric("当前任务", state.task_title)
++    with col_plan:
++        st.metric("计划时长", f"{state.planned_minutes} 分钟")
++
++    status_labels = {
++        FocusTimerStatus.IDLE: "待开始",
++        FocusTimerStatus.RUNNING: "专注中",
++        FocusTimerStatus.PAUSED: "已暂停",
++        FocusTimerStatus.FINISHED: "已结束",
++    }
++
++    countdown_col, progress_col = st.columns([1, 1])
++    with countdown_col:
++        st.markdown("### 倒计时")
++        st.markdown(
++            f"<h1 style='text-align:center;font-size:3rem;margin:0;'>"
++            f"{format_duration(remaining_seconds)}</h1>",
++            unsafe_allow_html=True,
++        )
++    with progress_col:
++        st.markdown("### 进度")
++        progress = min(elapsed_seconds / planned_seconds, 1.0) if planned_seconds else 0
++        st.progress(progress, text=f"已专注 {format_duration(elapsed_seconds)}")
++        st.write(f"状态：**{status_labels[state.status]}**")
++        st.write(f"暂停次数：**{state.pause_count}**")
++
++    if state.status == FocusTimerStatus.RUNNING:
++        _auto_refresh_countdown(workflow)
++
++    st.divider()
++    _render_controls(workflow, state)
++
++    if state.status == FocusTimerStatus.FINISHED:
++        st.success("本次督学已结束，记录已保存。可在「专注统计」查看。")
++
++
++def _auto_refresh_countdown(workflow: FocusTimerWorkflow) -> None:
++    @st.fragment(run_every=timedelta(seconds=1))
++    def _tick():
++        state = workflow.get_timer_state(st.session_state)
++        if state.status != FocusTimerStatus.RUNNING:
++            return
++        remaining = workflow.get_remaining_seconds(state)
++        elapsed = workflow.get_elapsed_seconds(state)
++        st.caption(
++            f"实时更新 · 剩余 {format_duration(remaining)} · "
++            f"已专注 {format_duration(elapsed)}"
++        )
++
++    _tick()
++
++
++def _render_controls(workflow: FocusTimerWorkflow, state) -> None:
++    col1, col2, col3, col4 = st.columns(4)
++
++    with col1:
++        start_disabled = state.status != FocusTimerStatus.IDLE
++        if st.button(
++            "开始",
++            use_container_width=True,
++            type="primary",
++            disabled=start_disabled,
++        ):
++            try:
++                workflow.start_timer(st.session_state)
++                st.rerun()
++            except ValueError as exc:
++                st.error(str(exc))
++
++    with col2:
++        if st.button(
++            "暂停",
++            use_container_width=True,
++            disabled=state.status != FocusTimerStatus.RUNNING,
++        ):
++            try:
++                workflow.pause_timer(st.session_state)
++                st.rerun()
++            except ValueError as exc:
++                st.error(str(exc))
++
++    with col3:
++        if st.button(
++            "继续",
++            use_container_width=True,
++            disabled=state.status != FocusTimerStatus.PAUSED,
++        ):
++            try:
++                workflow.resume_timer(st.session_state)
++                st.rerun()
++            except ValueError as exc:
++                st.error(str(exc))
++
++    with col4:
++        end_disabled = state.status in {
++            FocusTimerStatus.IDLE,
++            FocusTimerStatus.FINISHED,
++        }
++        if st.button(
++            "结束",
++            use_container_width=True,
++            disabled=end_disabled,
++        ):
++            st.session_state["show_focus_finish_form"] = True
++
++    if st.session_state.get("show_focus_finish_form") and state.status not in {
++        FocusTimerStatus.IDLE,
++        FocusTimerStatus.FINISHED,
++    }:
++        with st.form("finish_focus_form"):
++            reflection = st.text_area(
++                "学习心得（可选）",
++                placeholder="写下本次专注的收获、卡点或下一步计划…",
++                height=100,
++            )
++            submitted = st.form_submit_button("确认结束并保存", type="primary")
++            if submitted:
++                try:
++                    record = workflow.end_timer(
++                        st.session_state,
++                        reflection=reflection,
++                    )
++                    st.session_state.pop("show_focus_finish_form", None)
++                    st.success(
++                        f"已保存：实际专注 {record.actual_minutes} 分钟，"
++                        f"{'完成计划' if record.completed else '未完成计划'}"
++                    )
++                    st.rerun()
++                except ValueError as exc:
++                    st.error(str(exc))
++
++    if state.status == FocusTimerStatus.FINISHED:
++        if st.button("开始新的督学", use_container_width=True):
++            workflow.reset_timer(st.session_state)
++            st.session_state.pop("show_focus_finish_form", None)
++            st.switch_page("pages/1_今日作战台.py")
+diff --git a/workflows/__init__.py b/workflows/__init__.py
+new file mode 100644
+index 0000000..c6964e1
+--- /dev/null
++++ b/workflows/__init__.py
+@@ -0,0 +1,4 @@
++from workflows.focus_timer_workflow import FocusTimerWorkflow
++from workflows.daily_task_workflow import DailyTaskWorkflow
++
++__all__ = ["FocusTimerWorkflow", "DailyTaskWorkflow"]
+diff --git a/workflows/daily_task_workflow.py b/workflows/daily_task_workflow.py
+new file mode 100644
+index 0000000..0b9f0ab
+--- /dev/null
++++ b/workflows/daily_task_workflow.py
+@@ -0,0 +1,17 @@
++from typing import List
++
++from repositories.task_repository import TaskRepository
++from schemas.task import DailyTaskCreate, DailyTaskRecord
++
++
++class DailyTaskWorkflow:
++    def __init__(self, task_repository: TaskRepository | None = None) -> None:
++        self.task_repository = task_repository or TaskRepository()
++
++    def get_today_tasks(self, seed_demo: bool = True) -> List[DailyTaskRecord]:
++        if seed_demo:
++            self.task_repository.seed_demo_tasks_if_empty()
++        return self.task_repository.list_today_tasks()
++
++    def add_task(self, payload: DailyTaskCreate) -> DailyTaskRecord:
++        return self.task_repository.create_task(payload)
+diff --git a/workflows/focus_timer_workflow.py b/workflows/focus_timer_workflow.py
+new file mode 100644
+index 0000000..bb05f5e
+--- /dev/null
++++ b/workflows/focus_timer_workflow.py
+@@ -0,0 +1,192 @@
++from datetime import datetime, timezone
++from typing import Optional
++
++from repositories.focus_session_repository import FocusSessionRepository
++from repositories.task_repository import TaskRepository
++from schemas.focus_session import (
++    FocusSessionCreate,
++    FocusSessionFinish,
++    FocusSessionRecord,
++    FocusStats,
++    FocusTimerState,
++    FocusTimerStatus,
++)
++from schemas.task import DailyTaskRecord, DailyTaskStatus
++
++
++FOCUS_TIMER_STATE_KEY = "focus_timer_state"
++FOCUS_DB_SESSION_ID_KEY = "focus_db_session_id"
++
++
++class FocusTimerWorkflow:
++    def __init__(
++        self,
++        task_repository: Optional[TaskRepository] = None,
++        focus_repository: Optional[FocusSessionRepository] = None,
++    ) -> None:
++        self.task_repository = task_repository or TaskRepository()
++        self.focus_repository = focus_repository or FocusSessionRepository()
++
++    def get_timer_state(self, session_state) -> FocusTimerState:
++        raw = session_state.get(FOCUS_TIMER_STATE_KEY)
++        if raw is None:
++            return FocusTimerState()
++        if isinstance(raw, FocusTimerState):
++            return raw
++        return FocusTimerState.model_validate(raw)
++
++    def save_timer_state(self, session_state, state: FocusTimerState) -> None:
++        session_state[FOCUS_TIMER_STATE_KEY] = state.model_dump()
++
++    def prepare_from_task(self, session_state, task_id: int) -> FocusTimerState:
++        task = self.task_repository.get_task_by_id(task_id)
++        if task is None:
++            raise ValueError(f"任务不存在: {task_id}")
++
++        state = FocusTimerState(
++            task_id=task.id,
++            task_title=task.display_title,
++            subject=task.subject,
++            planned_minutes=task.estimated_minutes,
++            status=FocusTimerStatus.IDLE,
++        )
++        session_state.pop(FOCUS_DB_SESSION_ID_KEY, None)
++        self.save_timer_state(session_state, state)
++        return state
++
++    def start_timer(self, session_state) -> FocusTimerState:
++        state = self.get_timer_state(session_state)
++        if not state.task_title:
++            raise ValueError("请先选择任务")
++
++        now = self._now_iso()
++        if state.status == FocusTimerStatus.IDLE:
++            state.session_started_at = now
++            state.segment_started_at = now
++            state.accumulated_seconds = 0
++            state.pause_count = 0
++
++            payload = FocusSessionCreate(
++                task_id=state.task_id,
++                task_title=state.task_title,
++                subject=state.subject,
++                planned_minutes=state.planned_minutes,
++            )
++            session_id = self.focus_repository.create_session(payload, started_at=now)
++            session_state[FOCUS_DB_SESSION_ID_KEY] = session_id
++
++            if state.task_id is not None:
++                self.task_repository.update_task_status(
++                    state.task_id,
++                    DailyTaskStatus.IN_PROGRESS,
++                )
++        elif state.status == FocusTimerStatus.PAUSED:
++            state.segment_started_at = now
++        else:
++            raise ValueError("当前状态无法开始")
++
++        state.status = FocusTimerStatus.RUNNING
++        self.save_timer_state(session_state, state)
++        return state
++
++    def pause_timer(self, session_state) -> FocusTimerState:
++        state = self.get_timer_state(session_state)
++        if state.status != FocusTimerStatus.RUNNING:
++            raise ValueError("计时未在进行中")
++
++        elapsed = self._segment_elapsed_seconds(state)
++        state.accumulated_seconds += elapsed
++        state.pause_count += 1
++        state.segment_started_at = None
++        state.status = FocusTimerStatus.PAUSED
++        self.save_timer_state(session_state, state)
++        return state
++
++    def resume_timer(self, session_state) -> FocusTimerState:
++        state = self.get_timer_state(session_state)
++        if state.status != FocusTimerStatus.PAUSED:
++            raise ValueError("计时未处于暂停状态")
++
++        state.segment_started_at = self._now_iso()
++        state.status = FocusTimerStatus.RUNNING
++        self.save_timer_state(session_state, state)
++        return state
++
++    def end_timer(
++        self,
++        session_state,
++        reflection: str = "",
++    ) -> FocusSessionRecord:
++        state = self.get_timer_state(session_state)
++        if state.status == FocusTimerStatus.IDLE:
++            raise ValueError("尚未开始督学")
++
++        actual_seconds = self.get_elapsed_seconds(state)
++        ended_at = self._now_iso()
++        planned_seconds = state.planned_minutes * 60
++        completed = actual_seconds >= planned_seconds
++
++        db_session_id = session_state.get(FOCUS_DB_SESSION_ID_KEY)
++        if db_session_id is None:
++            raise ValueError("缺少专注记录，无法保存")
++
++        payload = FocusSessionFinish(
++            actual_seconds=actual_seconds,
++            pause_count=state.pause_count,
++            completed=completed,
++            reflection=reflection,
++        )
++        record = self.focus_repository.finish_session(
++            int(db_session_id),
++            payload,
++            ended_at=ended_at,
++        )
++
++        if state.task_id is not None:
++            next_status = (
++                DailyTaskStatus.DONE if completed else DailyTaskStatus.IN_PROGRESS
++            )
++            self.task_repository.update_task_status(state.task_id, next_status)
++
++        state.status = FocusTimerStatus.FINISHED
++        self.save_timer_state(session_state, state)
++        session_state.pop(FOCUS_DB_SESSION_ID_KEY, None)
++        return record
++
++    def reset_timer(self, session_state) -> None:
++        session_state.pop(FOCUS_TIMER_STATE_KEY, None)
++        session_state.pop(FOCUS_DB_SESSION_ID_KEY, None)
++
++    def get_elapsed_seconds(self, state: FocusTimerState) -> int:
++        elapsed = state.accumulated_seconds
++        if state.status == FocusTimerStatus.RUNNING and state.segment_started_at:
++            elapsed += self._segment_elapsed_seconds(state)
++        return max(elapsed, 0)
++
++    def get_remaining_seconds(self, state: FocusTimerState) -> int:
++        planned_seconds = state.planned_minutes * 60
++        return max(planned_seconds - self.get_elapsed_seconds(state), 0)
++
++    def get_stats(self) -> FocusStats:
++        return self.focus_repository.get_stats()
++
++    def list_recent_sessions(self, limit: int = 20):
++        return self.focus_repository.list_recent_sessions(limit=limit)
++
++    def get_task_for_timer(self, task_id: int) -> DailyTaskRecord:
++        task = self.task_repository.get_task_by_id(task_id)
++        if task is None:
++            raise ValueError(f"任务不存在: {task_id}")
++        return task
++
++    @staticmethod
++    def _now_iso() -> str:
++        return datetime.now(timezone.utc).isoformat()
++
++    @staticmethod
++    def _segment_elapsed_seconds(state: FocusTimerState) -> int:
++        if not state.segment_started_at:
++            return 0
++        started = datetime.fromisoformat(state.segment_started_at)
++        now = datetime.now(timezone.utc)
++        return max(int((now - started).total_seconds()), 0)
