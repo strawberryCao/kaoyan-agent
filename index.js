@@ -6,6 +6,59 @@ const fs = require("fs");
 let mainWindow;
 let streamlitProcess = null;
 
+const userDataPath = app.getPath("userData");
+const configPath = path.join(userDataPath, "config.json");
+
+const defaultConfig = {
+  llmApiKey: "your_api_key_here",
+  llmBaseUrl: "https://api.deepseek.com/v1",
+  llmModel: "deepseek-v4-pro",
+  embeddingProvider: "siliconflow",
+  embeddingModel: "BAAI/bge-m3",
+  embeddingApiKey: "",
+  embeddingBaseUrl: "https://api.siliconflow.cn/v1",
+  embeddingBatchSize: 16,
+  embeddingTimeoutSeconds: 20,
+  graphBackend: "neo4j",
+  neo4jUri: "bolt://localhost:7687",
+  neo4jUsername: "neo4j",
+  neo4jPassword: "",
+  graphSyncRawEvents: false,
+  yoloFocusWeightsPath: "",
+  yoloFocusCameraId: 0,
+  yoloFocusConfidenceThreshold: 0.5,
+  yoloFocusInferenceFps: 3,
+  yoloPersonWeightsPath: "models/person_presence/yolov8n.pt",
+  yoloPersonConfidenceThreshold: 0.35,
+  focusPhoneConfidenceThreshold: 0.35,
+  focusVisualEvidenceThreshold: 0.55,
+  focusPresenceFocusConfidenceThreshold: 0.65,
+  yoloAwayConfirmSeconds: 10,
+  yoloBehaviorWindowSeconds: 3,
+  focusReportMinCoverage: 0.8,
+};
+
+function camelToScreamingSnake(str) {
+  return str.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase();
+}
+
+function configToEnv(config) {
+  const env = {};
+
+  for (const key of Object.keys(config)) {
+    const envKey = camelToScreamingSnake(key);
+    let value = config[key];
+    if (typeof value === "boolean") {
+      value = value ? "true" : "false";
+    } else if (value !== undefined && value !== null) {
+      value = String(value);
+    }
+    env[envKey] = value;
+  }
+
+  return env;
+}
+
 function getResourcePath(relativePath) {
   let basePath;
   if (app.isPackaged) {
@@ -52,7 +105,17 @@ function createWindow() {
 }
 
 app.on("ready", () => {
+  if (!fs.existsSync(configPath)) {
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify(defaultConfig, null, 2),
+      "utf8",
+    );
+  }
+
+  const config = JSON.parse(fs.readFileSync(configPath, { encoding: "utf8" }));
   const appPyPath = getResourcePath(path.join("streamlit", "app.py"));
+
   if (!fs.existsSync(appPyPath)) {
     showErrorDialog(
       "File Not Found",
@@ -79,18 +142,28 @@ app.on("ready", () => {
     `Starting Streamlit: ${pythonExecutable} -m streamlit run ${appPyPath} --server.headless true --server.enableCORS false --server.enableXsrfProtection false`,
   );
 
-  streamlitProcess = spawn(pythonExecutable, [
-    "-m",
-    "streamlit",
-    "run",
-    appPyPath,
-    "--server.headless",
-    "true",
-    "--server.enableCORS",
-    "false",
-    "--server.enableXsrfProtection",
-    "false",
-  ]);
+  streamlitProcess = spawn(
+    pythonExecutable,
+    [
+      "-m",
+      "streamlit",
+      "run",
+      appPyPath,
+      "--server.headless",
+      "true",
+      "--server.enableCORS",
+      "false",
+      "--server.enableXsrfProtection",
+      "false",
+    ],
+    {
+      env: {
+        ...process.env,
+        ...configToEnv(config),
+        USER_DATA_PATH: userDataPath,
+      },
+    },
+  );
 
   streamlitProcess.stdout.on("data", (data) => {
     const output = data.toString();

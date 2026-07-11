@@ -8,6 +8,7 @@ from kaoyan_agent.core.paths import DB_PATH, PROJECT_ROOT
 try:
     from dotenv import load_dotenv
 except ModuleNotFoundError:
+
     def load_dotenv(*args, **kwargs):
         return False
 
@@ -28,7 +29,7 @@ class Settings:
     embedding_batch_size: int = 16
     embedding_timeout_seconds: float = 20.0
     vector_backend: str = "chroma"
-    chroma_persist_dir: Path = PROJECT_ROOT / "data" / "chroma"
+    chroma_persist_dir: Path = DB_PATH / "chroma"
     graph_backend: str = "neo4j"
     graph_sync_raw_events: bool = False
     neo4j_uri: str = "bolt://localhost:7687"
@@ -40,7 +41,9 @@ class Settings:
     yolo_focus_camera_id: int = 0
     yolo_focus_confidence_threshold: float = 0.5
     yolo_focus_inference_fps: int = 3
-    yolo_person_weights_path: Path = PROJECT_ROOT / "models" / "person_presence" / "yolov8n.pt"
+    yolo_person_weights_path: Path = (
+        PROJECT_ROOT / "models" / "person_presence" / "yolov8n.pt"
+    )
     yolo_person_confidence_threshold: float = 0.35
     focus_phone_confidence_threshold: float = 0.35
     focus_visual_evidence_threshold: float = 0.55
@@ -64,7 +67,9 @@ def get_settings() -> Settings:
     except ValueError:
         yolo_camera_id = 0
     try:
-        yolo_confidence = float(os.getenv("YOLO_FOCUS_CONFIDENCE_THRESHOLD", "0.5") or 0.5)
+        yolo_confidence = float(
+            os.getenv("YOLO_FOCUS_CONFIDENCE_THRESHOLD", "0.5") or 0.5
+        )
     except ValueError:
         yolo_confidence = 0.5
     try:
@@ -104,11 +109,15 @@ def get_settings() -> Settings:
     except ValueError:
         away_confirm_seconds = 10
     try:
-        behavior_window_seconds = int(os.getenv("YOLO_BEHAVIOR_WINDOW_SECONDS", "3") or 3)
+        behavior_window_seconds = int(
+            os.getenv("YOLO_BEHAVIOR_WINDOW_SECONDS", "3") or 3
+        )
     except ValueError:
         behavior_window_seconds = 3
     try:
-        report_min_coverage = float(os.getenv("FOCUS_REPORT_MIN_COVERAGE", "0.8") or 0.8)
+        report_min_coverage = float(
+            os.getenv("FOCUS_REPORT_MIN_COVERAGE", "0.8") or 0.8
+        )
     except ValueError:
         report_min_coverage = 0.8
 
@@ -127,13 +136,19 @@ def get_settings() -> Settings:
         embedding_timeout_seconds=float(
             os.getenv("EMBEDDING_TIMEOUT_SECONDS", "20") or 20
         ),
-        vector_backend=os.getenv("VECTOR_BACKEND", "chroma").strip().lower() or "chroma",
+        vector_backend=os.getenv("VECTOR_BACKEND", "chroma").strip().lower()
+        or "chroma",
         chroma_persist_dir=Path(
-            os.getenv("CHROMA_PERSIST_DIR", str(PROJECT_ROOT / "data" / "chroma")).strip()
+            os.getenv(
+                "CHROMA_PERSIST_DIR", str(PROJECT_ROOT / "data" / "chroma")
+            ).strip()
             or PROJECT_ROOT / "data" / "chroma"
         ),
         graph_backend=os.getenv("GRAPH_BACKEND", "neo4j").strip().lower() or "neo4j",
-        graph_sync_raw_events=(os.getenv("GRAPH_SYNC_RAW_EVENTS", "false").strip().lower() in {"1", "true", "yes", "on"}),
+        graph_sync_raw_events=(
+            os.getenv("GRAPH_SYNC_RAW_EVENTS", "false").strip().lower()
+            in {"1", "true", "yes", "on"}
+        ),
         neo4j_uri=os.getenv("NEO4J_URI", "bolt://localhost:7687").strip(),
         neo4j_username=os.getenv("NEO4J_USERNAME", "neo4j").strip(),
         neo4j_password=os.getenv("NEO4J_PASSWORD", "").strip(),
@@ -151,9 +166,10 @@ def get_settings() -> Settings:
         yolo_person_confidence_threshold=max(0.0, min(1.0, person_confidence)),
         focus_phone_confidence_threshold=max(0.0, min(1.0, phone_confidence)),
         focus_visual_evidence_threshold=max(0.0, min(1.0, visual_evidence_threshold)),
-        focus_presence_focus_confidence_threshold=max(0.0, min(1.0, presence_focus_threshold)),
+        focus_presence_focus_confidence_threshold=max(
+            0.0, min(1.0, presence_focus_threshold)
+        ),
         yolo_away_confirm_seconds=max(3, min(120, away_confirm_seconds)),
         yolo_behavior_window_seconds=max(1, min(10, behavior_window_seconds)),
         focus_report_min_coverage=max(0.0, min(1.0, report_min_coverage)),
     )
-

@@ -1,10 +1,10 @@
 from pathlib import Path
-
+from os import getenv
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR = Path(getenv("USER_DATA_PATH", PROJECT_ROOT)) / "data"
 DB_PATH = DATA_DIR / "app.db"
 
 SCHEMA_PATH = PACKAGE_ROOT / "db" / "schema.sql"
