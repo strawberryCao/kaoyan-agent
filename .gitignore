@@ -72,3 +72,5 @@ tree_*.txt
 
 # Local documentation/export drafts
 docs/
+
+node_modules/
