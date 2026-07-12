@@ -48,9 +48,9 @@ output/
 *.swp
 
 # ML/model artifacts
-models/
-weights/
-runs/
+# models/
+# weights/
+# runs/
 
 # Tool-specific generated lock files
 uv.lock

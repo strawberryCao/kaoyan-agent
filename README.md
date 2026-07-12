@@ -31,14 +31,22 @@ npm install
 
 ### 配置 Python 环境
 
-Streamlit 应用位于 `streamlit/` 目录，使用 `uv` 管理依赖。
+本项目中的 Streamlit 应用位于 `streamlit/` 目录，依赖 Python 虚拟环境。你可以通过以下任一方式完成配置：
 
-```bash
-cd streamlit
-uv venv
-uv sync
-cd ..
-```
+- **方式一 (推荐)**：运行项目预置脚本，自动完成虚拟环境创建与依赖同步
+
+  ```bash
+  npm run preinstall
+  ```
+
+- **方式二 (手动)**：进入 `streamlit/` 目录，使用 `uv` 管理工具手动配置
+
+  ```bash
+  cd streamlit
+  uv venv
+  uv sync
+  cd ..
+  ```
 
 > **注意**：Electron 打包时会自动将 `streamlit/` 目录作为额外资源复制，并期望 `streamlit/.venv/Scripts/python.exe` (Windows) 或 `streamlit/.venv/bin/python` (macOS/Linux) 存在，因此务必先执行 `uv sync`。
 
