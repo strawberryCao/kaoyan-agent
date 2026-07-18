@@ -547,9 +547,12 @@ def render_vision_supervision_card(workflow: FocusWorkflow, current_id, settings
     elif camera_enabled and not session_running:
         stop_active_camera_processor()
         st.info("番茄钟暂停或已结束，视觉督学已停止。")
-    elif camera_enabled and not available:
-        st.warning(recognizer.status_message() or "本地视觉证据模型不可用。")
     elif camera_enabled:
+        if not available:
+            st.warning(
+                (recognizer.status_message() or "本地视觉证据模型不可用。")
+                + " 摄像头预览仍会开启，但暂不执行自动识别。"
+            )
         camera_context = render_auto_camera_sampler(
             workflow=workflow,
             focus_session_id=int(current_id),

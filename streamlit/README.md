@@ -90,6 +90,8 @@ YOLO_BEHAVIOR_WINDOW_SECONDS=3
 FOCUS_REPORT_MIN_COVERAGE=0.8
 ```
 
+桌面构建会内置 `models/person_presence/yolov8n.pt`，默认不需要配置或下载权重。可写数据使用 Electron 注入的 `USER_DATA_PATH`；`USED_DATA_PATH` 不是有效变量名。
+
 历史数据库 `data/app.db` 是真实本地数据文件。不要删除、重建或重置该文件。
 
 ## 部署方式

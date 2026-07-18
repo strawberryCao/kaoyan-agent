@@ -27,6 +27,7 @@ dist/
 
 # Virtual environments
 .venv/
+.python-runtime/
 venv/
 env/
 
@@ -43,14 +44,20 @@ logs/
 tmp/
 temp/
 output/
+tmp-test-run/
+pytest-cache-files-*/
 *.tmp
 *.bak
 *.swp
 
-# ML/model artifacts
-# models/
-# weights/
-# runs/
+# ML/model artifacts. Keep only the packaged COCO runtime weight in Git.
+models/
+weights/
+runs/
+*.pt
+!streamlit/models/
+!streamlit/models/person_presence/
+!streamlit/models/person_presence/yolov8n.pt
 
 # Tool-specific generated lock files
 uv.lock

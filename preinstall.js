@@ -1,7 +1,6 @@
-const { execSync, spawnSync } = require("child_process");
+const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
 
 function runCommand(command, args, options = {}) {
   console.log(`> ${command} ${args.join(" ")}`);
@@ -10,12 +9,64 @@ function runCommand(command, args, options = {}) {
 }
 
 function checkCommand(command) {
-  try {
-    const which = os.platform() === "win32" ? "where" : "which";
-    execSync(`${which} ${command}`, { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
+  const result = spawnSync(command, ["--version"], { stdio: "ignore" });
+  return !result.error && result.status === 0;
+}
+
+function stageWindowsPythonRuntime(streamlitDir) {
+  if (process.platform !== "win32") {
+    return;
+  }
+
+  const venvConfigPath = path.join(streamlitDir, ".venv", "pyvenv.cfg");
+  if (!fs.existsSync(venvConfigPath)) {
+    throw new Error(`Virtual environment config not found: ${venvConfigPath}`);
+  }
+
+  const config = fs.readFileSync(venvConfigPath, "utf8");
+  const homeMatch = config.match(/^home\s*=\s*(.+)$/m);
+  if (!homeMatch) {
+    throw new Error(`Python runtime home is missing from ${venvConfigPath}`);
+  }
+
+  const runtimeSource = fs.realpathSync(homeMatch[1].trim());
+  const sourcePython = path.join(runtimeSource, "python.exe");
+  if (!fs.existsSync(sourcePython)) {
+    throw new Error(`Python runtime is incomplete: ${sourcePython}`);
+  }
+
+  const runtimeTarget = path.join(streamlitDir, ".python-runtime");
+  console.log(`Staging self-contained Python runtime from ${runtimeSource}`);
+  fs.rmSync(runtimeTarget, { recursive: true, force: true });
+  const systemRoot = process.env.SystemRoot || "C:\\Windows";
+  const robocopy = path.join(systemRoot, "System32", "Robocopy.exe");
+  const copyResult = spawnSync(
+    robocopy,
+    [
+      runtimeSource,
+      runtimeTarget,
+      "/E",
+      "/COPY:DAT",
+      "/DCOPY:DAT",
+      "/R:1",
+      "/W:1",
+      "/NFL",
+      "/NDL",
+      "/NJH",
+      "/NJS",
+      "/NP",
+    ],
+    { stdio: "inherit" },
+  );
+  if (copyResult.error || copyResult.status === null || copyResult.status >= 8) {
+    throw (
+      copyResult.error ||
+      new Error(`Robocopy failed with code ${copyResult.status}`)
+    );
+  }
+
+  if (!fs.existsSync(path.join(runtimeTarget, "python.exe"))) {
+    throw new Error(`Failed to stage Python runtime at ${runtimeTarget}`);
   }
 }
 
@@ -57,6 +108,7 @@ function main() {
     process.exit(1);
   }
   console.log("uv sync completed.");
+  stageWindowsPythonRuntime(streamlitDir);
 }
 
 main();

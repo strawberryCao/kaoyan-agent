@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from kaoyan_agent.core.paths import DB_PATH, PROJECT_ROOT
+from kaoyan_agent.core.paths import DATA_DIR, DB_PATH, PROJECT_ROOT
 
 try:
     from dotenv import load_dotenv
@@ -29,7 +29,7 @@ class Settings:
     embedding_batch_size: int = 16
     embedding_timeout_seconds: float = 20.0
     vector_backend: str = "chroma"
-    chroma_persist_dir: Path = DB_PATH / "chroma"
+    chroma_persist_dir: Path = DATA_DIR / "chroma"
     graph_backend: str = "neo4j"
     graph_sync_raw_events: bool = False
     neo4j_uri: str = "bolt://localhost:7687"
@@ -140,9 +140,9 @@ def get_settings() -> Settings:
         or "chroma",
         chroma_persist_dir=Path(
             os.getenv(
-                "CHROMA_PERSIST_DIR", str(PROJECT_ROOT / "data" / "chroma")
+                "CHROMA_PERSIST_DIR", str(DATA_DIR / "chroma")
             ).strip()
-            or PROJECT_ROOT / "data" / "chroma"
+            or DATA_DIR / "chroma"
         ),
         graph_backend=os.getenv("GRAPH_BACKEND", "neo4j").strip().lower() or "neo4j",
         graph_sync_raw_events=(

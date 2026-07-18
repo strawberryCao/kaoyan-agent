@@ -6,7 +6,10 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
-    "preinstall": "node preinstall.js"
+    "preinstall": "node preinstall.js",
+    "predist": "node scripts/check-desktop-runtime.js",
+    "check:desktop": "node scripts/check-desktop-runtime.js",
+    "test:desktop": "node --test tests/desktop_runtime.test.js"
   },
   "repository": {
     "type": "git",
@@ -45,12 +48,18 @@
       "allowToChangeInstallationDirectory": true
     },
     "files": [
-      "index.js"
+      "index.js",
+      "desktop_runtime.js"
     ],
     "extraResources": [
       {
         "from": "streamlit",
-        "to": "streamlit"
+        "to": "streamlit",
+        "filter": [
+          "**/*",
+          ".venv/**/*",
+          ".python-runtime/**/*"
+        ]
       }
     ]
   }

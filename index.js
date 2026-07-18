@@ -1,7 +1,11 @@
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, session } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const {
+  installCameraPermissionHandlers,
+  resolveWritableConfigEnv,
+} = require("./desktop_runtime");
 
 let mainWindow;
 let streamlitProcess = null;
@@ -103,6 +107,8 @@ function createWindow() {
 }
 
 app.on("ready", () => {
+  installCameraPermissionHandlers(session.defaultSession);
+
   if (!fs.existsSync(configPath)) {
     fs.writeFileSync(
       configPath,
@@ -113,6 +119,13 @@ app.on("ready", () => {
 
   const config = JSON.parse(fs.readFileSync(configPath, { encoding: "utf8" }));
   const appPyPath = getResourcePath(path.join("streamlit", "app.py"));
+  const yoloConfigPath = path.join(userDataPath, "data", "ultralytics");
+  const configEnvironment = resolveWritableConfigEnv(
+    configToEnv(config),
+    userDataPath,
+  );
+
+  fs.mkdirSync(yoloConfigPath, { recursive: true });
 
   if (!fs.existsSync(appPyPath)) {
     showErrorDialog(
@@ -124,11 +137,26 @@ app.on("ready", () => {
   }
 
   let pythonExecutable;
+  const streamlitResourcePath = getResourcePath("streamlit");
+  const embeddedPythonPath = path.join(
+    streamlitResourcePath,
+    ".python-runtime",
+    "python.exe",
+  );
   const venvPath = getResourcePath(
     path.join("streamlit", ".venv", "Scripts", "python.exe"),
   );
+  const venvSitePackagesPath = path.join(
+    streamlitResourcePath,
+    ".venv",
+    "Lib",
+    "site-packages",
+  );
 
-  if (fs.existsSync(venvPath)) {
+  if (fs.existsSync(embeddedPythonPath)) {
+    pythonExecutable = embeddedPythonPath;
+    console.log("Using packaged Python runtime:", pythonExecutable);
+  } else if (fs.existsSync(venvPath)) {
     pythonExecutable = venvPath;
     console.log("Using packaged Python:", pythonExecutable);
   } else {
@@ -157,8 +185,12 @@ app.on("ready", () => {
     {
       env: {
         ...process.env,
-        ...configToEnv(config),
+        ...configEnvironment,
         USER_DATA_PATH: userDataPath,
+        YOLO_CONFIG_DIR: yoloConfigPath,
+        PYTHONPATH: [venvSitePackagesPath, process.env.PYTHONPATH]
+          .filter(Boolean)
+          .join(path.delimiter),
       },
     },
   );

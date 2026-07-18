@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import shutil
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from kaoyan_agent.core.paths import PROJECT_ROOT
+from kaoyan_agent.core.paths import DATA_DIR, PROJECT_ROOT
 from kaoyan_agent.services.focus_temporal_tracker import DETECTOR_VERSION
 
 
@@ -28,6 +29,13 @@ EXPECTED_BEHAVIOR_LABELS = FOCUSED_BEHAVIORS | DISTRACTED_BEHAVIORS | UNKNOWN_BE
 PERSON_LABELS = {"person"}
 PHONE_LABELS = {"cell_phone", "mobile_phone", "phone"}
 SCAN_DIRS = ("models", "weights", "runs", "src")
+
+
+def configure_yolo_runtime_dir() -> Path:
+    config_dir = DATA_DIR / "ultralytics"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("YOLO_CONFIG_DIR", str(config_dir.resolve()))
+    return config_dir
 
 
 @dataclass
@@ -564,6 +572,7 @@ class LocalYoloFocusRecognizer:
             return None
         try:
             if factory is None:
+                configure_yolo_runtime_dir()
                 from ultralytics import YOLO
 
                 factory = YOLO

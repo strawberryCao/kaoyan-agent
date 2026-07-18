@@ -70,7 +70,21 @@ npm run dist
 
 打包产物会输出到 `dist/` 目录，根据操作系统生成对应的安装包 (Windows 为 NSIS 安装包，macOS 为 `.dmg`)。
 
-打包时会包含整个 `streamlit/` 目录及其虚拟环境，因此请确保在打包前已经完成 `uv sync`。
+打包时会包含整个 `streamlit/` 目录及其虚拟环境。`npm run dist` 会先自动执行桌面运行时自检，确认：
+
+- `streamlit/.venv` 中已经安装 OpenCV、Ultralytics、PyAV、streamlit-webrtc 和 PyTorch；
+- `streamlit/models/person_presence/yolov8n.pt` 已进入构建目录；
+- 模型包含 `person` 和 `cell phone` 两个运行时必需类别。
+
+自检失败时不会生成安装包。也可以单独运行：
+
+```bash
+npm run check:desktop
+```
+
+Windows 构建还会把 `uv` 使用的基础 Python 暂存到
+`streamlit/.python-runtime` 并一并打包，因此目标电脑不需要另装 Python。
+运行时自检会直接使用这份独立解释器加载摄像头依赖和 YOLO 模型。
 
 ## 生产环境配置
 
@@ -103,11 +117,9 @@ npm run dist
   "neo4jUsername": "neo4j",
   "neo4jPassword": "",
   "graphSyncRawEvents": false,
-  "yoloFocusWeightsPath": "",
   "yoloFocusCameraId": 0,
   "yoloFocusConfidenceThreshold": 0.5,
   "yoloFocusInferenceFps": 3,
-  "yoloPersonWeightsPath": "models/person_presence/yolov8n.pt",
   "yoloPersonConfidenceThreshold": 0.35,
   "focusPhoneConfidenceThreshold": 0.35,
   "focusVisualEvidenceThreshold": 0.55,
@@ -117,3 +129,20 @@ npm run dist
   "focusReportMinCoverage": 0.8
 }
 ```
+
+## 摄像头与 YOLO
+
+- 桌面版内置 `streamlit/models/person_presence/yolov8n.pt`，运行时不依赖自动下载模型。
+- Electron 只允许 `localhost:8501` / `127.0.0.1:8501` 请求视频权限，不授予远程页面或纯音频请求。
+- Windows 还需要在“设置 → 隐私和安全性 → 相机”中开启“相机访问”和“允许桌面应用访问相机”。
+- 摄像头预览和 YOLO 状态相互独立：即使模型依赖异常，仍会显示摄像头预览，并提示自动识别已降级。
+
+生产环境传给 Python 的用户目录变量名是 `USER_DATA_PATH`（不是 `USED_DATA_PATH`）。数据库、Chroma 和 Ultralytics 配置写入该用户目录；YOLO 权重作为只读资源保留在安装目录。
+
+排查时先运行：
+
+```bash
+npm run check:desktop
+```
+
+若自检成功但没有画面，再检查 Windows 摄像头权限以及摄像头是否正被其他程序占用。

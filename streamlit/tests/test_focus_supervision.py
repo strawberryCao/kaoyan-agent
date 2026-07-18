@@ -1,3 +1,4 @@
+import os
 import tempfile
 import sys
 import types
@@ -14,6 +15,7 @@ from kaoyan_agent.services.local_yolo_focus_recognizer import (
     LocalYoloFocusRecognizer,
     diagnose_camera_access,
     find_yolo_weight_candidates,
+    configure_yolo_runtime_dir,
 )
 from kaoyan_agent.services.focus_report_calculator import calculate_focus_report
 from kaoyan_agent.services.focus_temporal_tracker import DETECTOR_VERSION, FocusTemporalTracker
@@ -202,6 +204,22 @@ class FocusWorkflowTest(unittest.TestCase):
 
 
 class LocalYoloFocusRecognizerTest(unittest.TestCase):
+    def test_yolo_runtime_dir_uses_writable_data_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            with patch(
+                "kaoyan_agent.services.local_yolo_focus_recognizer.DATA_DIR",
+                data_dir,
+            ):
+                with patch.dict(os.environ, {}, clear=True):
+                    result = configure_yolo_runtime_dir()
+                    configured = os.environ.get("YOLO_CONFIG_DIR")
+                    exists = result.is_dir()
+
+        self.assertEqual(result, data_dir / "ultralytics")
+        self.assertEqual(configured, str(result.resolve()))
+        self.assertTrue(exists)
+
     def test_pt_file_is_scanned_from_models(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             model_dir = Path(temp_dir) / "models" / "focus"
@@ -411,6 +429,8 @@ class FocusSupervisionUITest(unittest.TestCase):
         self.assertIn("find_yolo_weight_candidates", source)
         self.assertIn("latest_supervision_frame", source)
         self.assertIn("FocusTemporalTracker", source)
+        self.assertIn("摄像头预览仍会开启", source)
+        self.assertNotIn("elif camera_enabled and not available", source)
         self.assertNotIn("最近错误 / YOLO 诊断", source)
         self.assertNotIn("file_uploader", source)
 
