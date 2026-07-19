@@ -1,5 +1,5 @@
 {
-  "name": "app",
+  "name": "kaoyan-agent",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -16,8 +16,8 @@
     "url": "git+https://github.com/strawberryCao/kaoyan-agent.git"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "strawberryCao",
+  "license": "MIT",
   "type": "commonjs",
   "bugs": {
     "url": "https://github.com/strawberryCao/kaoyan-agent/issues"
@@ -28,7 +28,7 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "productName": "Streamlit",
+    "productName": "Kaoyan Agent",
     "directories": {
       "output": "dist"
     },
@@ -41,6 +41,18 @@
           ]
         }
       ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.education"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Education"
     },
     "nsis": {
       "oneClick": false,

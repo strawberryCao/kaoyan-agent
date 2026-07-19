@@ -1,4 +1,11 @@
-const { app, BrowserWindow, dialog, session } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  dialog,
+  session,
+  Menu,
+  shell,
+} = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
@@ -106,7 +113,113 @@ function createWindow() {
   });
 }
 
+function buildApplicationMenu() {
+  const template = [
+    {
+      label: "文件",
+      submenu: [
+        {
+          label: "配置文件",
+          click() {
+            shell.openPath(configPath).catch((err) => {
+              dialog.showErrorBox("打开失败", err.message);
+            });
+          },
+        },
+        {
+          label: "还原文件",
+          click() {
+            dialog
+              .showMessageBox({
+                type: "question",
+                title: "还原文件",
+                message:
+                  "此操作将恢复默认配置，当前配置将被覆盖，确定要继续吗？",
+                buttons: ["取消", "确定"],
+                defaultId: 0,
+                cancelId: 0,
+              })
+              .then(({ response }) => {
+                if (response === 1) {
+                  try {
+                    fs.writeFileSync(
+                      configPath,
+                      JSON.stringify(defaultConfig, null, 2),
+                      "utf8",
+                    );
+                    dialog
+                      .showMessageBox({
+                        type: "info",
+                        title: "还原文件",
+                        message: "已还原文件，重启应用以使新配置生效。",
+                      })
+                      .then(() => {
+                        app.exit(0);
+                      });
+                  } catch (err) {
+                    dialog.showErrorBox("还原失败", err.message);
+                  }
+                }
+              });
+          },
+        },
+        { type: "separator" },
+        { label: "退出", role: "quit" },
+      ],
+    },
+    {
+      label: "编辑",
+      submenu: [
+        { label: "撤销", role: "undo" },
+        { label: "重做", role: "redo" },
+        { type: "separator" },
+        { label: "剪切", role: "cut" },
+        { label: "复制", role: "copy" },
+        { label: "粘贴", role: "paste" },
+        { label: "删除", role: "delete" },
+        { type: "separator" },
+        { label: "全选", role: "selectAll" },
+      ],
+    },
+    {
+      label: "视图",
+      submenu: [
+        { label: "重新加载", role: "reload" },
+        { label: "强制重新加载", role: "forceReload" },
+        { label: "开发者工具", role: "toggleDevTools" },
+        { type: "separator" },
+        { label: "实际大小", role: "resetZoom" },
+        { label: "放大", role: "zoomIn" },
+        { label: "缩小", role: "zoomOut" },
+        { type: "separator" },
+        { label: "全屏", role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "窗口",
+      submenu: [
+        { label: "最小化", role: "minimize" },
+        { label: "关闭", role: "close" },
+        ...(process.platform === "darwin"
+          ? [{ label: "前置全部", role: "front" }]
+          : []),
+      ],
+    },
+  ];
+
+  if (process.platform === "darwin") {
+    template.unshift({
+      label: app.name,
+      submenu: [{ label: "退出", role: "quit" }],
+    });
+  }
+
+  return Menu.buildFromTemplate(template);
+}
 app.on("ready", () => {
+  const menu = buildApplicationMenu();
+  Menu.setApplicationMenu(menu);
+
   installCameraPermissionHandlers(session.defaultSession);
 
   if (!fs.existsSync(configPath)) {
