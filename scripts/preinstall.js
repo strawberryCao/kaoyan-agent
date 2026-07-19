@@ -58,7 +58,11 @@ function stageWindowsPythonRuntime(streamlitDir) {
     ],
     { stdio: "inherit" },
   );
-  if (copyResult.error || copyResult.status === null || copyResult.status >= 8) {
+  if (
+    copyResult.error ||
+    copyResult.status === null ||
+    copyResult.status >= 8
+  ) {
     throw (
       copyResult.error ||
       new Error(`Robocopy failed with code ${copyResult.status}`)
@@ -80,7 +84,7 @@ function main() {
   }
   console.log("uv found.");
 
-  const streamlitDir = path.join(__dirname, "streamlit");
+  const streamlitDir = path.join(__dirname, "..", "streamlit");
   if (!fs.existsSync(streamlitDir)) {
     console.error(`Error: ${streamlitDir} directory not found.`);
     process.exit(1);

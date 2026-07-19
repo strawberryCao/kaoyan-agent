@@ -10,6 +10,7 @@ if str(SRC_DIR) not in sys.path:
 from kaoyan_agent.core.settings import get_settings
 from kaoyan_agent.db import init_db
 from kaoyan_agent.repositories.conversation_repository import ChatRepository
+from kaoyan_agent.ui.components.common import inject_global_styles
 
 # from kaoyan_agent.ui.agent_trace_page import render_agent_trace_page
 # from kaoyan_agent.ui.chat_page import render_chat_page
@@ -160,6 +161,8 @@ def render_view(view: str, settings) -> None:
 
 
 def main() -> None:
+    inject_global_styles()
+
     st.set_page_config(page_title="Kaoyan Problem Discovery Agent", layout="wide")
     settings = get_settings()
     init_db()

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
-    "preinstall": "node preinstall.js",
+    "preinstall": "node scripts/preinstall.js",
     "predist": "node scripts/check-desktop-runtime.js",
     "check:desktop": "node scripts/check-desktop-runtime.js",
     "test:desktop": "node --test tests/desktop_runtime.test.js"

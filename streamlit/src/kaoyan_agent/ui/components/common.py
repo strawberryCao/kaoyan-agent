@@ -66,6 +66,15 @@ MISTAKE_REASON_LABELS_ZH = {
 def inject_global_styles() -> None:
     st.html("""
         <style>
+            .stAppDeployButton, .stMainMenu {
+                display: none !important;
+            }
+        </style>
+    """)
+    return
+
+    st.html("""
+        <style>
         :root {
             --kaoyan-primary: #9f1239;
             --kaoyan-primary-soft: #fff1f2;
