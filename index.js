@@ -1,3 +1,5 @@
+"use strict";
+
 const {
   app,
   BrowserWindow,
@@ -6,13 +8,15 @@ const {
   Menu,
   shell,
 } = require("electron");
-const { spawn } = require("child_process");
+const { spawn, execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const {
   installCameraPermissionHandlers,
   resolveWritableConfigEnv,
 } = require("./desktop_runtime");
+
+app.commandLine.appendSwitch('gtk-version', '4');
 
 let mainWindow;
 let streamlitProcess = null;
@@ -53,7 +57,6 @@ function camelToScreamingSnake(str) {
 
 function configToEnv(config) {
   const env = {};
-
   for (const key of Object.keys(config)) {
     const envKey = camelToScreamingSnake(key);
     let value = config[key];
@@ -64,7 +67,6 @@ function configToEnv(config) {
     }
     env[envKey] = value;
   }
-
   return env;
 }
 
@@ -80,6 +82,91 @@ function getResourcePath(relativePath) {
 
 function showErrorDialog(title, message) {
   dialog.showErrorBox(title, message);
+}
+
+function getPythonInfo() {
+  const streamlitResourcePath = getResourcePath("streamlit");
+  const isWin = process.platform === "win32";
+
+  const embeddedPython = path.join(
+    streamlitResourcePath,
+    ".python-runtime",
+    isWin ? "python.exe" : "python",
+  );
+  if (fs.existsSync(embeddedPython)) {
+    return { executable: embeddedPython, type: "embedded" };
+  }
+
+  const venvRoot = path.join(streamlitResourcePath, ".venv");
+  const venvBinDir = isWin ? "Scripts" : "bin";
+  const venvPython = path.join(
+    venvRoot,
+    venvBinDir,
+    isWin ? "python.exe" : "python",
+  );
+  if (fs.existsSync(venvPython)) {
+    return { executable: venvPython, type: "venv", root: venvRoot };
+  }
+
+  return { executable: "python", type: "system" };
+}
+
+function getSitePackages(pythonExe) {
+  try {
+    const cmd = `"${pythonExe}" -c "import sysconfig; print(sysconfig.get_path('purelib'))"`;
+    const sitePackages = execSync(cmd, { encoding: "utf-8" }).trim();
+    if (sitePackages && fs.existsSync(sitePackages)) {
+      return sitePackages;
+    }
+    console.warn(`Resolved site-packages path does not exist: ${sitePackages}`);
+    return null;
+  } catch (err) {
+    console.warn("Failed to get site-packages via sysconfig:", err.message);
+    return null;
+  }
+}
+
+function guessSitePackages(venvRoot, isWin) {
+  if (isWin) {
+    const winPath = path.join(venvRoot, "Lib", "site-packages");
+    return fs.existsSync(winPath) ? winPath : null;
+  } else {
+    const libDir = path.join(venvRoot, "lib");
+    if (fs.existsSync(libDir)) {
+      const entries = fs.readdirSync(libDir);
+      const pyDir = entries.find((e) => e.startsWith("python3."));
+      if (pyDir) {
+        const guessed = path.join(libDir, pyDir, "site-packages");
+        return fs.existsSync(guessed) ? guessed : null;
+      }
+    }
+    return null;
+  }
+}
+
+function resolveSitePackages(pythonInfo) {
+  const isWin = process.platform === "win32";
+  let sitePackages = null;
+
+  if (pythonInfo.type === "venv" && pythonInfo.root) {
+    sitePackages = getSitePackages(pythonInfo.executable);
+    if (!sitePackages) {
+      sitePackages = guessSitePackages(pythonInfo.root, isWin);
+    }
+  } else if (pythonInfo.type === "embedded") {
+    sitePackages = getSitePackages(pythonInfo.executable);
+    if (!sitePackages) {
+      const embeddedDir = path.dirname(pythonInfo.executable);
+      const possibleVenv = path.join(embeddedDir, "..", ".venv");
+      if (fs.existsSync(possibleVenv)) {
+        sitePackages = guessSitePackages(possibleVenv, isWin);
+      }
+    }
+  } else {
+    sitePackages = getSitePackages(pythonInfo.executable);
+  }
+
+  return sitePackages;
 }
 
 function createWindow() {
@@ -132,7 +219,6 @@ function buildApplicationMenu() {
             dialog
               .showMessageBox({
                 type: "question",
-                title: "还原文件",
                 message:
                   "此操作将恢复默认配置，当前配置将被覆盖，确定要继续吗？",
                 buttons: ["取消", "确定"],
@@ -150,7 +236,7 @@ function buildApplicationMenu() {
                     dialog
                       .showMessageBox({
                         type: "info",
-                        title: "还原文件",
+      
                         message: "已还原文件，重启应用以使新配置生效。",
                       })
                       .then(() => {
@@ -216,6 +302,7 @@ function buildApplicationMenu() {
 
   return Menu.buildFromTemplate(template);
 }
+
 app.on("ready", () => {
   const menu = buildApplicationMenu();
   Menu.setApplicationMenu(menu);
@@ -249,37 +336,34 @@ app.on("ready", () => {
     return;
   }
 
-  let pythonExecutable;
-  const streamlitResourcePath = getResourcePath("streamlit");
-  const embeddedPythonPath = path.join(
-    streamlitResourcePath,
-    ".python-runtime",
-    "python.exe",
-  );
-  const venvPath = getResourcePath(
-    path.join("streamlit", ".venv", "Scripts", "python.exe"),
-  );
-  const venvSitePackagesPath = path.join(
-    streamlitResourcePath,
-    ".venv",
-    "Lib",
-    "site-packages",
-  );
+  const pythonInfo = getPythonInfo();
+  const pythonExecutable = pythonInfo.executable;
+  console.log(`Using Python: ${pythonExecutable} (type: ${pythonInfo.type})`);
 
-  if (fs.existsSync(embeddedPythonPath)) {
-    pythonExecutable = embeddedPythonPath;
-    console.log("Using packaged Python runtime:", pythonExecutable);
-  } else if (fs.existsSync(venvPath)) {
-    pythonExecutable = venvPath;
-    console.log("Using packaged Python:", pythonExecutable);
+  let venvSitePackagesPath = resolveSitePackages(pythonInfo);
+  if (venvSitePackagesPath) {
+    console.log(`Resolved site-packages: ${venvSitePackagesPath}`);
   } else {
-    pythonExecutable = "python";
-    console.log("Using system Python");
+    console.warn(
+      "Could not locate site-packages; PYTHONPATH may be incomplete.",
+    );
   }
 
   console.log(
     `Starting Streamlit: ${pythonExecutable} -m streamlit run ${appPyPath} --server.headless true --server.enableCORS false --server.enableXsrfProtection false`,
   );
+
+  const env = {
+    ...process.env,
+    ...configEnvironment,
+    USER_DATA_PATH: userDataPath,
+    YOLO_CONFIG_DIR: yoloConfigPath,
+  };
+  if (venvSitePackagesPath) {
+    env.PYTHONPATH = [venvSitePackagesPath, process.env.PYTHONPATH]
+      .filter(Boolean)
+      .join(path.delimiter);
+  }
 
   streamlitProcess = spawn(
     pythonExecutable,
@@ -295,17 +379,7 @@ app.on("ready", () => {
       "--server.enableXsrfProtection",
       "false",
     ],
-    {
-      env: {
-        ...process.env,
-        ...configEnvironment,
-        USER_DATA_PATH: userDataPath,
-        YOLO_CONFIG_DIR: yoloConfigPath,
-        PYTHONPATH: [venvSitePackagesPath, process.env.PYTHONPATH]
-          .filter(Boolean)
-          .join(path.delimiter),
-      },
-    },
+    { env },
   );
 
   streamlitProcess.stdout.on("data", (data) => {

@@ -10,10 +10,43 @@ const pythonExecutable =
   process.platform === "win32"
     ? path.join(streamlitDir, ".python-runtime", "python.exe")
     : path.join(streamlitDir, ".venv", "bin", "python");
-const venvSitePackages =
-  process.platform === "win32"
-    ? path.join(streamlitDir, ".venv", "Lib", "site-packages")
-    : path.join(streamlitDir, ".venv", "lib", "python3", "site-packages");
+
+function getVenvSitePackages() {
+  if (!fs.existsSync(pythonExecutable)) {
+    throw new Error(`Python executable not found: ${pythonExecutable}`);
+  }
+
+  const result = spawnSync(
+    pythonExecutable,
+    ["-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+    {
+      encoding: "utf-8",
+      env: process.env,
+    },
+  );
+
+  if (result.status !== 0 || !result.stdout.trim()) {
+    const errMsg = result.stderr || "unknown error";
+    throw new Error(`Failed to get site-packages path: ${errMsg}`);
+  }
+
+  const sitePackages = result.stdout.trim();
+
+  if (!fs.existsSync(sitePackages)) {
+    throw new Error(
+      `Resolved site-packages path does not exist: ${sitePackages}`,
+    );
+  }
+  return sitePackages;
+}
+
+let venvSitePackages;
+try {
+  venvSitePackages = getVenvSitePackages();
+} catch (error) {
+  fail(`Unable to determine site-packages: ${error.message}`);
+}
+
 const modelPath = path.join(
   streamlitDir,
   "models",
@@ -28,10 +61,14 @@ function fail(message) {
 }
 
 if (!fs.existsSync(pythonExecutable)) {
-  fail(`Self-contained Python runtime not found: ${pythonExecutable}. Run npm run preinstall first.`);
+  fail(
+    `Self-contained Python runtime not found: ${pythonExecutable}. Run npm run preinstall first.`,
+  );
 }
 if (!fs.existsSync(venvSitePackages)) {
-  fail(`Python dependencies not found: ${venvSitePackages}. Run npm run preinstall first.`);
+  fail(
+    `Python dependencies not found: ${venvSitePackages}. Run npm run preinstall first.`,
+  );
 }
 if (!fs.existsSync(modelPath) || fs.statSync(modelPath).size < 1_000_000) {
   fail(`YOLO model is missing or incomplete: ${modelPath}`);
