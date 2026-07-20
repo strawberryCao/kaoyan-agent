@@ -2,6 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const path = require("node:path");
 const {
   installCameraPermissionHandlers,
@@ -87,4 +88,15 @@ test("relative writable paths are anchored in Electron userData", () => {
     result.YOLO_PERSON_WEIGHTS_PATH,
     "models/person_presence/yolov8n.pt",
   );
+});
+
+test("desktop preflight rejects a degraded visual recognizer", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "scripts", "check-desktop-runtime.js"),
+    "utf8",
+  );
+
+  assert.match(source, /LocalYoloFocusRecognizer/);
+  assert.match(source, /is_fully_available\(\)/);
+  assert.match(source, /visual runtime is degraded/);
 });

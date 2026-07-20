@@ -204,6 +204,43 @@ class FocusWorkflowTest(unittest.TestCase):
 
 
 class LocalYoloFocusRecognizerTest(unittest.TestCase):
+    def test_mediapipe_pose_uses_bundled_offline_model(self):
+        constructor_calls = {}
+
+        class FakeConstructor:
+            def __init__(self, name):
+                self.name = name
+
+            def __call__(self, **kwargs):
+                constructor_calls[self.name] = kwargs
+                return object()
+
+        fake_mediapipe = types.SimpleNamespace(
+            solutions=types.SimpleNamespace(
+                face_mesh=types.SimpleNamespace(FaceMesh=FakeConstructor("face_mesh")),
+                pose=types.SimpleNamespace(Pose=FakeConstructor("pose")),
+                hands=types.SimpleNamespace(Hands=FakeConstructor("hands")),
+            )
+        )
+        recognizer = LocalYoloFocusRecognizer.__new__(LocalYoloFocusRecognizer)
+        recognizer._mp_face_mesh = None
+        recognizer._mp_pose = None
+        recognizer._mp_hands = None
+        recognizer.debug = {
+            "mediapipe": {
+                "model_loaded": False,
+                "status": "not_loaded",
+                "error": "",
+            }
+        }
+
+        with patch.dict(sys.modules, {"mediapipe": fake_mediapipe}):
+            recognizer._load_mediapipe_extractors()
+
+        self.assertEqual(constructor_calls["pose"]["model_complexity"], 1)
+        self.assertTrue(recognizer.debug["mediapipe"]["model_loaded"])
+        self.assertEqual(recognizer.debug["mediapipe"]["status"], "available")
+
     def test_yolo_runtime_dir_uses_writable_data_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
