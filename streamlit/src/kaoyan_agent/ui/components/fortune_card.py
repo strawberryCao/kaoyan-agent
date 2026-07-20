@@ -127,15 +127,16 @@ def render_latest_fortune_item(item: dict, kind: str) -> None:
     subject = html.escape(item.get("subject", "未指定"))
     minutes = int(item.get("estimated_minutes") or 5)
     reason = html.escape(item.get("reason", ""))
-    st.html(f"""
-    <div class="kaoyan-card">
-        <div class="kaoyan-card-title">{title_esc}</div>
-        <div><strong>{action_label_esc}：</strong> {item_title}</div>
-        <div><strong>主题/科目：</strong> {subject}</div>
-        <div><strong>预计时间：</strong> {minutes} 分钟</div>
-        <div><strong>说明：</strong> {reason}</div>
-    </div>
-    """)
+    with st.container(border=True):
+        st.html(f"""
+        <div class="kaoyan-card">
+            <div class="kaoyan-card-title">{title_esc}</div>
+            <div><strong>{action_label_esc}：</strong> {item_title}</div>
+            <div><strong>主题/科目：</strong> {subject}</div>
+            <div><strong>预计时间：</strong> {minutes} 分钟</div>
+            <div><strong>说明：</strong> {reason}</div>
+        </div>
+        """)
 
 
 def render_history_item(record: dict) -> None:
@@ -155,4 +156,5 @@ def render_history_item(record: dict) -> None:
     if minutes > 0:
         html_content += f'    <div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">预计时间：{minutes} 分钟</div>\n'
     html_content += "</div>"
-    st.html(html_content)
+    with st.container(border=True):
+        st.html(html_content)

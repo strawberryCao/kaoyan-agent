@@ -50,23 +50,25 @@ def render_memory_card(memory: dict) -> None:
     content = html.escape(str(memory.get("content") or ""))
     importance = memory.get("importance", 1)
     confidence = float(memory.get("confidence") or 0)
-    st.html(f"""
-        <div class="kaoyan-card">
-            <strong>{memory_type}</strong>
-            <div>{content}</div>
-            <div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">重要度：{importance} / 置信度：{confidence:.2f}</div>
-        </div>
-    """)
+    with st.container(border=True):
+        st.html(f"""
+            <div class="kaoyan-card">
+                <strong>{memory_type}</strong>
+                <div>{content}</div>
+                <div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">重要度：{importance} / 置信度：{confidence:.2f}</div>
+            </div>
+        """)
 
 
 def render_skill_card(skill: dict) -> None:
     skill_name = html.escape(str(skill.get("skill_name") or "技能记忆"))
     description = html.escape(str(skill.get("description") or ""))
     confidence = float(skill.get("confidence") or 0)
-    st.html(f"""
-        <div class="kaoyan-card">
-            <strong>{skill_name}</strong>
-            <div>{description}</div>
-            <div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">置信度：{confidence:.2f}</div>
-        </div>
-    """)
+    with st.container(border=True):
+        st.html(f"""
+            <div class="kaoyan-card">
+                <strong>{skill_name}</strong>
+                <div>{description}</div>
+                <div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">置信度：{confidence:.2f}</div>
+            </div>
+        """)

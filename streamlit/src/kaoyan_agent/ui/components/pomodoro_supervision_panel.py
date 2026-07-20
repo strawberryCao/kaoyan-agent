@@ -30,6 +30,20 @@ from kaoyan_agent.workflows.focus import FOCUS_DB_SESSION_ID_KEY, FocusWorkflow
 from kaoyan_agent.workflows.workspace_workflow import WorkspaceWorkflow
 
 
+def render_metric_card(label: str, value: Any, helper: str | None = None) -> None:
+    escaped_label = html.escape(label)
+    escaped_value = html.escape(str(value))
+    escaped_helper = html.escape(helper) if helper else ""
+    with st.container(border=True):
+        st.html(f"""
+            <div class="kaoyan-card">
+                <div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">{escaped_label}</div>
+                <div style="font-size:1.5rem;font-weight:600;margin:4px 0;">{escaped_value}</div>
+                {f'<div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">{escaped_helper}</div>' if helper else ''}
+            </div>
+        """)
+
+
 STATE_LABELS = ["focused", "away", "distracted", "unknown"]
 STATE_LABEL_ZH = {
     "focused": "专注",
@@ -112,7 +126,12 @@ class AutoFocusFrameProcessor:
 
     def _maybe_start_recognition(self, frame_array, now: float) -> None:
         with self._lock:
-            if not self._active or not self._workflow or not self._recognizer or not self._focus_session_id:
+            if (
+                not self._active
+                or not self._workflow
+                or not self._recognizer
+                or not self._focus_session_id
+            ):
                 return
             if not self._recognizer.is_available() or self._recognizing:
                 return
@@ -154,7 +173,9 @@ class AutoFocusFrameProcessor:
             recognition = {
                 **observation,
                 "label": observation["state_type"],
-                "label_text": LABEL_TEXT.get(observation["state_type"], LABEL_TEXT["unknown"]),
+                "label_text": LABEL_TEXT.get(
+                    observation["state_type"], LABEL_TEXT["unknown"]
+                ),
                 "record_result": record_result,
                 "recognized_at": time.strftime("%H:%M:%S"),
             }
@@ -177,7 +198,11 @@ class AutoFocusFrameProcessor:
             workflow = self._workflow
             focus_session_id = self._focus_session_id
             last_observation_at = self._last_observation_at
-        segment = tracker.flush(last_observation_at) if tracker and last_observation_at else None
+        segment = (
+            tracker.flush(last_observation_at)
+            if tracker and last_observation_at
+            else None
+        )
         return self._persist_segment(workflow, focus_session_id, segment)
 
     @staticmethod
@@ -188,7 +213,9 @@ class AutoFocusFrameProcessor:
             focus_session_id=focus_session_id,
             state_type=segment.state_type,
             confidence=segment.confidence,
-            focus_score=workflow.default_focus_score(segment.state_type, segment.confidence),
+            focus_score=workflow.default_focus_score(
+                segment.state_type, segment.confidence
+            ),
             explanation=segment.explanation,
             metadata={"recognition_source": "local_yolo"},
             observed_seconds=segment.observed_seconds,
@@ -281,7 +308,9 @@ def camera_browser_access_issue(page_url: str) -> str:
         return ""
     if scheme in {"https", "file"}:
         return ""
-    if scheme == "http" and (hostname == "localhost" or hostname.endswith(".localhost")):
+    if scheme == "http" and (
+        hostname == "localhost" or hostname.endswith(".localhost")
+    ):
         return ""
     if scheme == "http":
         try:
@@ -422,8 +451,9 @@ def render_timer_card(
 ) -> None:
     html_content = '<div class="kaoyan-card">'
     html_content += '<div class="kaoyan-card-title">番茄钟</div>'
-    html_content += '</div>'
-    st.html(html_content)
+    html_content += "</div>"
+    with st.container(border=True):
+        st.html(html_content)
     if "start" in controls:
         render_start_controls(workflow)
         return
@@ -439,11 +469,15 @@ def render_timer_card(
         f"任务：{timer_state.task_title or '临时专注任务'}"
     )
     control_cols = st.columns(2)
-    if "pause" in controls and control_cols[0].button("暂停", key="supervision_pause_timer"):
+    if "pause" in controls and control_cols[0].button(
+        "暂停", key="supervision_pause_timer"
+    ):
         stop_active_camera_processor()
         show_timer_operation_result(workflow.safe_pause_timer(st.session_state))
         st.rerun()
-    if "resume" in controls and control_cols[0].button("继续", key="supervision_resume_timer"):
+    if "resume" in controls and control_cols[0].button(
+        "继续", key="supervision_resume_timer"
+    ):
         show_timer_operation_result(workflow.safe_resume_timer(st.session_state))
         st.rerun()
     with st.expander("结束时填写复盘备注", expanded=False):
@@ -454,7 +488,9 @@ def render_timer_card(
         if result.get("ok"):
             report_id = result.get("result", {}).get("report_id")
             if report_id:
-                st.session_state.latest_supervision_report = workflow.get_focus_report(report_id)
+                st.session_state.latest_supervision_report = workflow.get_focus_report(
+                    report_id
+                )
             st.success(result["message"])
         else:
             st.warning(result["message"])
@@ -468,7 +504,9 @@ def render_start_controls(workflow: FocusWorkflow) -> None:
         label = f"{task.get('title') or '未命名任务'}（{int(task.get('estimated_minutes') or 25)} 分钟）"
         task_options[label] = int(task["id"])
 
-    selected_task = st.selectbox("关联任务", list(task_options.keys()), key="supervision_task")
+    selected_task = st.selectbox(
+        "关联任务", list(task_options.keys()), key="supervision_task"
+    )
     planned_minutes = st.number_input(
         "计划分钟",
         min_value=1,
@@ -499,7 +537,9 @@ def render_start_controls(workflow: FocusWorkflow) -> None:
         st.warning(str(exc))
 
 
-def render_vision_supervision_card(workflow: FocusWorkflow, current_id, settings: Settings) -> None:
+def render_vision_supervision_card(
+    workflow: FocusWorkflow, current_id, settings: Settings
+) -> None:
     selected_weights, _ = select_yolo_weights_path(settings)
     with st.spinner("加载本地视觉证据模型..."):
         recognizer = get_cached_recognizer(
@@ -518,30 +558,76 @@ def render_vision_supervision_card(workflow: FocusWorkflow, current_id, settings
     html_content = '<div class="kaoyan-card">'
     html_content += '<div class="kaoyan-card-title">实时视觉督学</div>'
     html_content += f'<span class="kaoyan-badge">视觉证据：{"完整可用" if recognizer.is_fully_available() else "降级" if available else "不可用"}</span>'
-    html_content += '</div>'
-    st.html(html_content)
+    html_content += "</div>"
+    with st.container(border=True):
+        st.html(html_content)
     col_label, col_duration, col_monitored = st.columns(3)
-    col_label.metric("当前识别", latest.get("label_text") or LABEL_TEXT["unknown"])
-    col_duration.metric("状态持续", f"{int(latest.get('state_elapsed_seconds') or 0)} 秒")
-    col_monitored.metric("已监测", f"{int(latest.get('monitoring_seconds') or 0)} 秒")
+    # col_label.metric("当前识别", latest.get("label_text") or LABEL_TEXT["unknown"])
+    # col_duration.metric(
+    #     "状态持续", f"{int(latest.get('state_elapsed_seconds') or 0)} 秒"
+    # )
+    # col_monitored.metric("已监测", f"{int(latest.get('monitoring_seconds') or 0)} 秒")
+
+    with col_label:
+        render_metric_card(
+            "当前识别",
+            latest.get("label_text") or LABEL_TEXT["unknown"],
+        )
+    with col_duration:
+        render_metric_card(
+            "状态持续",
+            f"{int(latest.get('state_elapsed_seconds') or 0)} 秒",
+        )
+    with col_monitored:
+        render_metric_card(
+            "已监测",
+            f"{int(latest.get('monitoring_seconds') or 0)} 秒",
+        ),
+
     st.caption(f"最近识别：{latest.get('recognized_at') or '暂无'}")
     if latest.get("explanation"):
         st.caption(str(latest["explanation"]))
     if latest:
-        person_text = "有人" if latest.get("person_present") is True else "无人" if latest.get("person_present") is False else "未确认"
-        phone_text = "检测到手机" if latest.get("phone_present") is True else "未检测到手机" if latest.get("phone_present") is False else "未确认"
-        face_text = "可见" if latest.get("face_visible") is True else "不可见" if latest.get("face_visible") is False else "未确认"
-        head_text = "稳定" if latest.get("head_centered") is True else "不足" if latest.get("head_centered") is False else "未确认"
-        pose_text = "可用" if latest.get("pose_visible") is True else "不足" if latest.get("pose_visible") is False else "未确认"
+        person_text = (
+            "有人"
+            if latest.get("person_present") is True
+            else "无人" if latest.get("person_present") is False else "未确认"
+        )
+        phone_text = (
+            "检测到手机"
+            if latest.get("phone_present") is True
+            else "未检测到手机" if latest.get("phone_present") is False else "未确认"
+        )
+        face_text = (
+            "可见"
+            if latest.get("face_visible") is True
+            else "不可见" if latest.get("face_visible") is False else "未确认"
+        )
+        head_text = (
+            "稳定"
+            if latest.get("head_centered") is True
+            else "不足" if latest.get("head_centered") is False else "未确认"
+        )
+        pose_text = (
+            "可用"
+            if latest.get("pose_visible") is True
+            else "不足" if latest.get("pose_visible") is False else "未确认"
+        )
         evidence_score = float(latest.get("visual_evidence_score") or 0.0) * 100
         st.caption(
             f"证据：人体={person_text} / 手机={phone_text} / 脸部={face_text} / "
             f"头部={head_text} / 姿态={pose_text} / 视觉证据={evidence_score:.0f}%"
         )
 
-    camera_enabled = st.toggle("开启摄像头督学", value=False, key="supervision_camera_enabled")
-    active_session = workflow.focus_repository.get_session(int(current_id)) if current_id else None
-    session_running = bool(active_session and active_session.get("timer_status") == "running")
+    camera_enabled = st.toggle(
+        "开启摄像头督学", value=False, key="supervision_camera_enabled"
+    )
+    active_session = (
+        workflow.focus_repository.get_session(int(current_id)) if current_id else None
+    )
+    session_running = bool(
+        active_session and active_session.get("timer_status") == "running"
+    )
     if camera_enabled and not current_id:
         st.info("请先开始番茄钟，再记录视觉督学状态。")
     elif camera_enabled and not session_running:
@@ -562,24 +648,33 @@ def render_vision_supervision_card(workflow: FocusWorkflow, current_id, settings
             behavior_window_seconds=settings.yolo_behavior_window_seconds,
         )
         if camera_context and camera_context.video_processor:
-            st.session_state.supervision_frame_processor = camera_context.video_processor
+            st.session_state.supervision_frame_processor = (
+                camera_context.video_processor
+            )
         render_auto_camera_status(camera_context)
     else:
         stop_active_camera_processor()
 
     latest_frame = st.session_state.get("latest_supervision_frame")
     if latest_frame is not None:
-        st.image(latest_frame, channels="BGR", caption="最近帧", use_container_width=True)
+        st.image(
+            latest_frame, channels="BGR", caption="最近帧", use_container_width=True
+        )
     else:
         st.caption("最近帧：暂无")
 
-    camera_diagnostic = st.session_state.get("latest_supervision_camera_diagnostic") or {}
+    camera_diagnostic = (
+        st.session_state.get("latest_supervision_camera_diagnostic") or {}
+    )
     if st.button("检查本机摄像头", key="supervision_camera_diagnostic"):
         with st.spinner("检查本机摄像头状态..."):
             camera_diagnostic = get_camera_diagnostic(settings.yolo_focus_camera_id)
             st.session_state.latest_supervision_camera_diagnostic = camera_diagnostic
     if camera_diagnostic and not camera_diagnostic.get("can_open"):
-        st.info(camera_diagnostic.get("error") or "摄像头无法打开。浏览器摄像头仍可能需要单独授权。")
+        st.info(
+            camera_diagnostic.get("error")
+            or "摄像头无法打开。浏览器摄像头仍可能需要单独授权。"
+        )
 
 
 def stop_active_camera_processor() -> None:
@@ -649,8 +744,9 @@ def render_state_timeline(workflow: FocusWorkflow, focus_session_id: int) -> Non
         html_content = '<div class="kaoyan-card">'
         html_content += f'<div class="kaoyan-card-title">{state_label} / {observed_seconds} 秒</div>'
         html_content += f'<div class="kaoyan-muted">{created_at} / {explanation}</div>'
-        html_content += '</div>'
-        st.html(html_content)
+        html_content += "</div>"
+        with st.container(border=True):
+            st.html(html_content)
 
 
 def render_focus_report(report: dict) -> None:
@@ -670,13 +766,22 @@ def render_focus_report(report: dict) -> None:
         f'离开 {int(report.get("away_seconds") or 0)} 秒 / '
         f'无法判断 {int(report.get("unknown_seconds") or 0)} 秒</div>'
     )
-    evidence_text = "证据充足" if report.get("evidence_status") == "sufficient" else "证据不足，不代表整场"
-    html_content += f'<div>证据状态：{evidence_text}</div>'
-    html_content += f'<div>总结：{html.escape(str(report.get("ai_summary") or ""))}</div>'
+    evidence_text = (
+        "证据充足"
+        if report.get("evidence_status") == "sufficient"
+        else "证据不足，不代表整场"
+    )
+    html_content += f"<div>证据状态：{evidence_text}</div>"
+    html_content += (
+        f'<div>总结：{html.escape(str(report.get("ai_summary") or ""))}</div>'
+    )
     html_content += f'<div>问题线索：{html.escape(str(report.get("possible_problem_signal") or ""))}</div>'
-    html_content += f'<div>建议行动：{html.escape(str(report.get("suggested_action") or ""))}</div>'
-    html_content += '</div>'
-    st.html(html_content)
+    html_content += (
+        f'<div>建议行动：{html.escape(str(report.get("suggested_action") or ""))}</div>'
+    )
+    html_content += "</div>"
+    with st.container(border=True):
+        st.html(html_content)
 
 
 def format_duration(seconds: int) -> str:
@@ -735,14 +840,19 @@ def render_focus_stats(workflow: FocusWorkflow) -> None:
             for session in recent_sessions:
                 title = html.escape(str(session.get("task_title") or "临时专注任务"))
                 subject = html.escape(str(session.get("subject") or "未指定"))
-                status = html.escape(render_status_badge(session.get("completion_status", "")))
+                status = html.escape(
+                    render_status_badge(session.get("completion_status", ""))
+                )
                 planned = int(session.get("planned_minutes") or 0)
                 actual = round(int(session.get("actual_seconds") or 0) / 60, 1)
                 html_content = '<div class="kaoyan-card">'
-                html_content += f'<div class="kaoyan-card-title">{title} / {subject}</div>'
+                html_content += (
+                    f'<div class="kaoyan-card-title">{title} / {subject}</div>'
+                )
                 html_content += (
                     f'<div class="kaoyan-muted">计划 {planned} 分钟 / '
-                    f'实际 {actual} 分钟 / 状态：{status}</div>'
+                    f"实际 {actual} 分钟 / 状态：{status}</div>"
                 )
-                html_content += '</div>'
-                st.html(html_content)
+                html_content += "</div>"
+                with st.container(border=True):
+                    st.html(html_content)

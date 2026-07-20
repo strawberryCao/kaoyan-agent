@@ -97,4 +97,5 @@ def render_score_record(record: dict) -> None:
     html += "</div>"  # 关闭卡片
 
     # 一次性渲染所有 HTML
-    st.html(html)
+    with st.container(border=True):
+        st.html(html)

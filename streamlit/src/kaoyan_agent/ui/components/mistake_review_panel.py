@@ -176,7 +176,8 @@ def render_review_card(card: dict, compact: bool = False) -> None:
             <div><strong>复习优先级：</strong> {priority_label_esc}</div>
         </div>
         """
-    st.html(content)
+    with st.container(border=True):
+        st.html(content)
 
 
 def shorten(value: str, limit: int = 90) -> str:

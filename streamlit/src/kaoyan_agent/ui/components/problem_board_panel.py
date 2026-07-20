@@ -115,7 +115,8 @@ def render_problem_card(problem: dict) -> None:
     html += "</div>"  # 关闭卡片
 
     # 一次性渲染所有 HTML
-    st.html(html)
+    with st.container(border=True):
+        st.html(html)
 
 
 def render_evidence_details(problems: list[dict]) -> None:

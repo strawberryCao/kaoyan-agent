@@ -94,7 +94,8 @@ def render_next_step(task_vms: list[dict]) -> None:
     )
     html += '<p style="font-size: 0.9rem; color: #888; margin: 4px 0;">建议先完成一个明确的小任务，再决定是否加码。</p>'
     html += "</div>"
-    st.html(html)
+    with st.container(border=True):
+        st.html(html)
 
 
 def render_today_tasks(
@@ -228,4 +229,5 @@ def render_task_history(workspace: WorkspaceWorkflow) -> None:
             f'<p style="font-size: 0.9rem; color: #888; margin: 4px 0;">{date_str}</p>'
         )
         html += "</div>"
-        st.html(html)
+        with st.container(border=True):
+            st.html(html)

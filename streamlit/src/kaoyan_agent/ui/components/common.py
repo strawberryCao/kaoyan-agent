@@ -187,27 +187,29 @@ def render_card(
     badge_html = (
         f'<span class="kaoyan-badge">{html.escape(badge)}</span>' if badge else ""
     )
-    st.html(f"""
-        <div class="kaoyan-card">
-            {badge_html}
-            <div class="kaoyan-card-title">{escaped_title}</div>
-            {f'<div>{escaped_body}</div>' if body else ''}
-            {f'<div class="kaoyan-card-footer">{escaped_footer}</div>' if footer else ''}
-        </div>
-    """)
+    with st.container(border=True):
+        st.html(f"""
+            <div class="kaoyan-card">
+                {badge_html}
+                <div class="kaoyan-card-title">{escaped_title}</div>
+                {f'<div>{escaped_body}</div>' if body else ''}
+                {f'<div class="kaoyan-card-footer">{escaped_footer}</div>' if footer else ''}
+            </div>
+        """)
 
 
 def render_metric_card(label: str, value: Any, helper: str | None = None) -> None:
     escaped_label = html.escape(label)
     escaped_value = html.escape(str(value))
     escaped_helper = html.escape(helper) if helper else ""
-    st.html(f"""
-        <div class="kaoyan-card">
-            <div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">{escaped_label}</div>
-            <div style="font-size:1.5rem;font-weight:600;margin:4px 0;">{escaped_value}</div>
-            {f'<div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">{escaped_helper}</div>' if helper else ''}
-        </div>
-    """)
+    with st.container(border=True):
+        st.html(f"""
+            <div class="kaoyan-card">
+                <div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">{escaped_label}</div>
+                <div style="font-size:1.5rem;font-weight:600;margin:4px 0;">{escaped_value}</div>
+                {f'<div style="font-size:0.85rem;color:var(--kaoyan-text-muted);">{escaped_helper}</div>' if helper else ''}
+            </div>
+        """)
 
 
 def source_label(source: str) -> str:

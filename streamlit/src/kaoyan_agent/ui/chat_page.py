@@ -150,16 +150,13 @@ def render_pending_actions_for_message(
             f'<span class="kaoyan-badge">{html.escape(str(payload.get("subject") or "未指定科目"))}</span>'
             f'<span class="kaoyan-badge">{html.escape(str(payload.get("chapter") or "未指定章节"))}</span>'
         )
-        html_content += (
-            f'<div>题目摘要：{html.escape(str(payload.get("question_summary") or payload.get("question") or "未填写"))}</div>'
-        )
+        html_content += f'<div>题目摘要：{html.escape(str(payload.get("question_summary") or payload.get("question") or "未填写"))}</div>'
         html_content += f'<div>错因线索：{html.escape(str(payload.get("user_reason") or "待确认"))}</div>'
-        html_content += (
-            f'<div>错因分类：{html.escape(mistake_reason_label(payload.get("mistake_reason", "unknown")))}</div>'
-        )
+        html_content += f'<div>错因分类：{html.escape(mistake_reason_label(payload.get("mistake_reason", "unknown")))}</div>'
         html_content += f'<div>复习优先级：{html.escape(str(payload.get("review_priority") or 3))}</div>'
-        html_content += '</div>'
-        st.html(html_content)
+        html_content += "</div>"
+        with st.container(border=True):
+            st.html(html_content)
         status = str(pending.get("status") or "")
         if status == "pending_confirmation":
             col_save, col_answer, col_later = st.columns(3)
