@@ -74,7 +74,8 @@ npm run dist
 
 - `streamlit/.venv` 中已经安装 OpenCV、Ultralytics、PyAV、streamlit-webrtc 和 PyTorch；
 - `streamlit/models/person_presence/yolov8n.pt` 已进入构建目录；
-- 模型包含 `person` 和 `cell phone` 两个运行时必需类别。
+- 模型包含 `person` 和 `cell phone` 两个运行时必需类别；
+- MediaPipe 或 OpenCV 本地视觉提取器能够实际初始化，识别器不是“降级”状态。
 
 自检失败时不会生成安装包。也可以单独运行：
 
@@ -133,6 +134,8 @@ Windows 构建还会把 `uv` 使用的基础 Python 暂存到
 ## 摄像头与 YOLO
 
 - 桌面版内置 `streamlit/models/person_presence/yolov8n.pt`，运行时不依赖自动下载模型。
+- 桌面视觉依赖锁定为 MediaPipe 0.10.21、OpenCV/Contrib 4.11.0.86，避免新版移除旧 API 后静默进入“视觉证据：降级”。
+- MediaPipe 姿态识别使用 wheel 内置的完整模型（`model_complexity=1`），首次启动也不会联网下载轻量模型。
 - Electron 只允许 `localhost:8501` / `127.0.0.1:8501` 请求视频权限，不授予远程页面或纯音频请求。
 - Windows 还需要在“设置 → 隐私和安全性 → 相机”中开启“相机访问”和“允许桌面应用访问相机”。
 - 摄像头预览和 YOLO 状态相互独立：即使模型依赖异常，仍会显示摄像头预览，并提示自动识别已降级。
@@ -144,5 +147,7 @@ Windows 构建还会把 `uv` 使用的基础 Python 暂存到
 ```bash
 npm run check:desktop
 ```
+
+该命令会实际加载 YOLO 权重和本地视觉提取器；若只能进入“视觉证据：降级”，自检会失败并阻止继续打包。
 
 若自检成功但没有画面，再检查 Windows 摄像头权限以及摄像头是否正被其他程序占用。

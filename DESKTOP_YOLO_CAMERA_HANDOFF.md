@@ -9,6 +9,8 @@
 - 摄像头预览不再依赖 YOLO 是否成功加载；模型异常时仍能看到预览，只暂停自动识别。
 - YOLO 配置、数据库和 Chroma 数据写入 Electron 用户数据目录，不再尝试写入只读安装目录。
 - Windows 包现在携带独立 Python 运行时，目标电脑不需要预装 Python 或 `uv`。
+- “视觉证据：降级”不是预期常态：MediaPipe/OpenCV 已锁定到兼容版本，构建自检会拒绝降级状态。
+- MediaPipe 姿态模型随依赖内置，首次启动不需要联网下载模型文件。
 - 正确的用户数据环境变量是 `USER_DATA_PATH`，不是 `USED_DATA_PATH`。
 
 大模型 API 设置页面属于此前已经处理的功能，不是本次改动范围。
@@ -48,37 +50,44 @@ Windows 虚拟环境里的解释器仍可能引用打包电脑上的 `uv` Python
 
 预安装脚本现在会把对应的基础 Python 暂存到 `streamlit/.python-runtime`。Electron 优先使用该解释器，并通过 `PYTHONPATH` 加载 `.venv` 中的第三方依赖。
 
+### 2.5 “视觉证据：降级”来自依赖 API 不兼容
+
+原构建环境解析到了 MediaPipe 0.10.35 和 OpenCV 5.0.0.93。该组合不再提供当前识别器调用的 `mediapipe.solutions`、`cv2.CascadeClassifier` 等 API，因此 YOLO 虽能加载，面部、姿态和手部证据却会真实降级。
+
+现在锁定为 MediaPipe 0.10.21、OpenCV/OpenCV Contrib 4.11.0.86 和兼容的 NumPy 1.26.4。另将姿态识别从会在首次运行下载模型的 `model_complexity=0` 改为 wheel 已内置的 `model_complexity=1`，保证离线桌面环境可启动。
+
 ## 3. 主要修改文件
 
 - `index.js`：安装摄像头权限处理器，设置用户数据路径、YOLO 配置路径和独立 Python 运行环境。
 - `desktop_runtime.js`：实现本地来源校验、Electron 权限策略和可写配置路径解析。
 - `preinstall.js`：修复 Windows 下 `uv` 检测，并暂存独立 Python 运行时。
 - `package.json`：将权限模块、`.venv`、独立 Python 和 Streamlit 资源加入桌面包；增加构建前检查及测试命令。
-- `scripts/check-desktop-runtime.js`：构建前实际导入摄像头依赖、加载 YOLO 权重并检查 `person`、`cell_phone` 类别。
-- `streamlit/src/kaoyan_agent/services/local_yolo_focus_recognizer.py`：把 Ultralytics 配置目录迁移到可写用户目录。
+- `scripts/check-desktop-runtime.js`：构建前实例化完整识别器，实际加载 YOLO 和本地视觉提取器；检测到降级状态会终止构建。
+- `streamlit/pyproject.toml`：锁定兼容的 MediaPipe、OpenCV 和 OpenCV Contrib 版本。
+- `streamlit/src/kaoyan_agent/services/local_yolo_focus_recognizer.py`：把 Ultralytics 配置目录迁移到可写用户目录，并使用 MediaPipe 内置的离线姿态模型。
 - `streamlit/src/kaoyan_agent/ui/components/pomodoro_supervision_panel.py`：解除摄像头预览对 YOLO 可用状态的依赖。
 - `streamlit/src/kaoyan_agent/core/settings.py`：把 Chroma 默认目录迁移到用户数据目录。
 - `tests/desktop_runtime.test.js`、`streamlit/tests/test_focus_supervision.py`：增加回归测试。
 
 ## 4. 已完成验证
 
-2026-07-19 在 Windows 上完成以下验证：
+2026-07-20 在 Windows 上完成以下验证：
 
-1. `npm run test:desktop`：3 项通过。
-2. `python -m pytest streamlit/tests/test_focus_supervision.py ...`：24 项通过。
+1. `npm run test:desktop`：4 项通过，包括“降级状态阻止构建”的回归测试。
+2. `python -m pytest streamlit/tests/test_focus_supervision.py ...`：25 项通过，包括 MediaPipe 离线模型回归测试。
 3. Python 编译检查：通过。
-4. `npm run check:desktop`：通过，独立 Python 能导入 OpenCV、Ultralytics、PyAV、streamlit-webrtc 和 PyTorch。
-5. YOLO 权重实际加载：通过，包含 `person` 和 `cell_phone` 类别。
+4. `npm run check:desktop`：通过，完整识别器不是降级状态。
+5. YOLO 权重实际加载：通过，包含 `person` 和 `cell_phone` 类别；OpenCV 本地视觉提取器实际加载。
 6. `npm run dist -- --dir`：通过，成功生成 `dist/win-unpacked/Streamlit.exe`。
-7. 直接使用成品目录中的 `.python-runtime/python.exe` 再次加载成品内 YOLO：通过，输出 `PACKAGED_RUNTIME_OK`。
+7. 直接使用成品目录中的 `.python-runtime/python.exe` 再次加载成品内 YOLO 和本地视觉证据：通过，版本为 MediaPipe 0.10.21、OpenCV 4.11.0、NumPy 1.26.4，输出 `PACKAGED_FULL_VISUAL_OK`。
 8. 成品 `app.asar` 已确认包含 `index.js` 和 `desktop_runtime.js`。
 9. 正式 NSIS 安装包生成：通过。
 
 本次生成的安装包信息：
 
 - 文件：`dist/Streamlit Setup 1.0.0.exe`
-- 大小：438.4 MiB
-- SHA-256：`BCD7A1142D69092BF931F4273F345E60BAB38B999A011FD1758DE993A07DCA29`
+- 大小：539.2 MiB（565347563 字节）
+- SHA-256：`C31D6E1CFB89E6EEBB9D20BDCD69D5E6363F9B1A457B7DD589E21B168AC254FB`
 - 签名状态：`NotSigned`
 
 该安装包可用于项目内部测试。因为当前没有配置 Windows 代码签名证书，Windows SmartScreen 可能显示未知发布者；对外正式分发前建议由负责人完成产品名称、图标和代码签名配置。
@@ -164,7 +173,7 @@ git push -u origin fix/desktop-yolo-camera
 
 ## 8. 可直接发给负责人的说明
 
-> 负责人你好，Windows 桌面版摄像头与 YOLO 问题已经修复。原问题包括 Electron 未处理摄像头权限、YOLO 不可用时 UI 阻断摄像头组件、运行配置可能写入只读安装目录，以及虚拟环境依赖开发机 Python。现在模型随包内置，不运行时下载；摄像头与模型状态已解耦；用户数据统一写入 `USER_DATA_PATH`；安装包携带独立 Python。已通过 3 项 Electron 测试、24 项视觉督学测试、YOLO 实际加载检查、Windows 未安装版构建和正式 NSIS 安装包构建。当前安装包未配置代码签名，适合内部测试；请按本文第 5 节再进行一次真实摄像头人工验收。
+> 负责人你好，Windows 桌面版摄像头、YOLO 以及“视觉证据：降级”问题已经修复。原问题包括 Electron 未处理摄像头权限、YOLO 不可用时 UI 阻断摄像头组件、运行配置可能写入只读安装目录、虚拟环境依赖开发机 Python，以及新版 MediaPipe/OpenCV API 不兼容。现在 YOLO 和 MediaPipe 姿态模型均随包内置，不在运行时下载；摄像头与模型状态已解耦；用户数据统一写入 `USER_DATA_PATH`；安装包携带独立 Python；构建自检会拒绝视觉降级状态。已通过 4 项 Electron 测试、25 项视觉督学测试、成品内 YOLO/视觉提取器实际加载检查、Windows 未安装版构建和正式 NSIS 安装包构建。当前安装包未配置代码签名，适合内部测试；请按本文第 5 节再进行一次真实摄像头人工验收。
 
 <!-- START: 正式版本删掉以下内容 -->
 

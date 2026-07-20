@@ -619,7 +619,10 @@ class LocalYoloFocusRecognizer:
             )
             self._mp_pose = mp.solutions.pose.Pose(
                 static_image_mode=False,
-                model_complexity=0,
+                # MediaPipe wheels bundle the full pose model (complexity 1).
+                # The lite model (complexity 0) is downloaded on first use,
+                # which is unreliable in an offline packaged desktop app.
+                model_complexity=1,
                 min_detection_confidence=0.5,
                 min_tracking_confidence=0.5,
             )

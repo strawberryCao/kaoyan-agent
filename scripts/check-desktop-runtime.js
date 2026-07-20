@@ -76,24 +76,34 @@ if (!fs.existsSync(modelPath) || fs.statSync(modelPath).size < 1_000_000) {
 
 const pythonCheck = String.raw`
 import importlib.util
+import json
 import sys
+from pathlib import Path
 
 required = ["cv2", "ultralytics", "av", "streamlit_webrtc", "torch"]
 missing = [name for name in required if importlib.util.find_spec(name) is None]
 if missing:
     raise SystemExit("missing Python modules: " + ", ".join(missing))
 
-from ultralytics import YOLO
+from kaoyan_agent.services.local_yolo_focus_recognizer import LocalYoloFocusRecognizer
 
-model = YOLO(sys.argv[1])
-labels = {
-    str(value).strip().lower().replace("-", "_").replace(" ", "_")
-    for value in (getattr(model, "names", {}) or {}).values()
-}
-missing_labels = {"person", "cell_phone"} - labels
-if missing_labels:
-    raise SystemExit("YOLO model lacks required labels: " + ", ".join(sorted(missing_labels)))
-print("Desktop visual runtime OK: person/cell_phone model and camera dependencies are available.")
+recognizer = LocalYoloFocusRecognizer(
+    None,
+    person_weights_path=Path(sys.argv[1]),
+    check_camera=False,
+)
+if not recognizer.is_fully_available():
+    diagnostic = {
+        "status_message": recognizer.status_message(),
+        "coco": recognizer.debug.get("coco", {}),
+        "mediapipe": recognizer.debug.get("mediapipe", {}),
+        "opencv_face": recognizer.debug.get("opencv_face", {}),
+    }
+    raise SystemExit(
+        "visual runtime is degraded: "
+        + json.dumps(diagnostic, ensure_ascii=False, default=str)
+    )
+print("Desktop visual runtime OK: YOLO, camera dependencies, and local visual evidence are fully available.")
 `;
 
 fs.mkdirSync(runtimeTempRoot, { recursive: true });
