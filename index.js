@@ -16,7 +16,9 @@ const {
   resolveWritableConfigEnv,
 } = require("./desktop_runtime");
 
-app.commandLine.appendSwitch('gtk-version', '4');
+if (process.platform === "linux") {
+  app.commandLine.appendSwitch("gtk-version", "4");
+}
 
 let mainWindow;
 let streamlitProcess = null;
@@ -108,16 +110,27 @@ function getPythonInfo() {
     return { executable: venvPython, type: "venv", root: venvRoot };
   }
 
-  return { executable: "python", type: "system" };
+  const systemPython = isWin ? "python.exe" : "python";
+  try {
+    const whichCmd = isWin ? "where" : "which";
+    const result = execSync(`${whichCmd} ${systemPython}`, {
+      encoding: "utf8",
+      shell: true,
+    });
+    if (result.trim()) return { executable: systemPython, type: "system" };
+  } catch (_) {}
+
+  return { executable: systemPython, type: "system" };
 }
 
 function getSitePackages(pythonExe) {
   try {
     const cmd = `"${pythonExe}" -c "import sysconfig; print(sysconfig.get_path('purelib'))"`;
-    const sitePackages = execSync(cmd, { encoding: "utf-8" }).trim();
-    if (sitePackages && fs.existsSync(sitePackages)) {
-      return sitePackages;
-    }
+    const sitePackages = execSync(cmd, {
+      encoding: "utf-8",
+      shell: true,
+    }).trim();
+    if (sitePackages && fs.existsSync(sitePackages)) return sitePackages;
     console.warn(`Resolved site-packages path does not exist: ${sitePackages}`);
     return null;
   } catch (err) {
@@ -150,20 +163,35 @@ function resolveSitePackages(pythonInfo) {
 
   if (pythonInfo.type === "venv" && pythonInfo.root) {
     sitePackages = getSitePackages(pythonInfo.executable);
-    if (!sitePackages) {
-      sitePackages = guessSitePackages(pythonInfo.root, isWin);
-    }
+    if (!sitePackages) sitePackages = guessSitePackages(pythonInfo.root, isWin);
   } else if (pythonInfo.type === "embedded") {
-    sitePackages = getSitePackages(pythonInfo.executable);
+    const embeddedDir = path.dirname(pythonInfo.executable);
+    const possibleVenv = path.join(embeddedDir, "..", ".venv");
+    if (fs.existsSync(possibleVenv)) {
+      sitePackages = guessSitePackages(possibleVenv, isWin);
+      if (sitePackages)
+        console.log("Using .venv site-packages for embedded Python.");
+    }
+
     if (!sitePackages) {
-      const embeddedDir = path.dirname(pythonInfo.executable);
-      const possibleVenv = path.join(embeddedDir, "..", ".venv");
-      if (fs.existsSync(possibleVenv)) {
-        sitePackages = guessSitePackages(possibleVenv, isWin);
-      }
+      sitePackages = getSitePackages(pythonInfo.executable);
     }
   } else {
     sitePackages = getSitePackages(pythonInfo.executable);
+  }
+
+  if (!sitePackages && isWin) {
+    const streamlitResourcePath = getResourcePath("streamlit");
+    const fallbackVenv = path.join(
+      streamlitResourcePath,
+      ".venv",
+      "Lib",
+      "site-packages",
+    );
+    if (fs.existsSync(fallbackVenv)) {
+      console.warn("Using fallback Windows site-packages path:", fallbackVenv);
+      sitePackages = fallbackVenv;
+    }
   }
 
   return sitePackages;
@@ -178,9 +206,7 @@ function createWindow() {
       contextIsolation: true,
     },
   });
-
   mainWindow.loadURL("http://localhost:8501");
-
   mainWindow.webContents.on(
     "did-fail-load",
     (event, errorCode, errorDescription) => {
@@ -190,7 +216,6 @@ function createWindow() {
       );
     },
   );
-
   mainWindow.on("closed", () => {
     mainWindow = null;
     if (streamlitProcess) {
@@ -208,9 +233,9 @@ function buildApplicationMenu() {
         {
           label: "配置文件",
           click() {
-            shell.openPath(configPath).catch((err) => {
-              dialog.showErrorBox("打开失败", err.message);
-            });
+            shell
+              .openPath(configPath)
+              .catch((err) => dialog.showErrorBox("打开失败", err.message));
           },
         },
         {
@@ -236,12 +261,9 @@ function buildApplicationMenu() {
                     dialog
                       .showMessageBox({
                         type: "info",
-      
                         message: "已还原文件，重启应用以使新配置生效。",
                       })
-                      .then(() => {
-                        app.exit(0);
-                      });
+                      .then(() => app.exit(0));
                   } catch (err) {
                     dialog.showErrorBox("还原失败", err.message);
                   }
@@ -292,14 +314,12 @@ function buildApplicationMenu() {
       ],
     },
   ];
-
   if (process.platform === "darwin") {
     template.unshift({
       label: app.name,
       submenu: [{ label: "退出", role: "quit" }],
     });
   }
-
   return Menu.buildFromTemplate(template);
 }
 
@@ -340,7 +360,7 @@ app.on("ready", () => {
   const pythonExecutable = pythonInfo.executable;
   console.log(`Using Python: ${pythonExecutable} (type: ${pythonInfo.type})`);
 
-  let venvSitePackagesPath = resolveSitePackages(pythonInfo);
+  const venvSitePackagesPath = resolveSitePackages(pythonInfo);
   if (venvSitePackagesPath) {
     console.log(`Resolved site-packages: ${venvSitePackagesPath}`);
   } else {
@@ -348,10 +368,6 @@ app.on("ready", () => {
       "Could not locate site-packages; PYTHONPATH may be incomplete.",
     );
   }
-
-  console.log(
-    `Starting Streamlit: ${pythonExecutable} -m streamlit run ${appPyPath} --server.headless true --server.enableCORS false --server.enableXsrfProtection false`,
-  );
 
   const env = {
     ...process.env,
@@ -363,7 +379,12 @@ app.on("ready", () => {
     env.PYTHONPATH = [venvSitePackagesPath, process.env.PYTHONPATH]
       .filter(Boolean)
       .join(path.delimiter);
+    console.log(`PYTHONPATH set to: ${env.PYTHONPATH}`);
   }
+
+  console.log(
+    `Starting Streamlit: ${pythonExecutable} -m streamlit run ${appPyPath} --server.headless true --server.enableCORS false --server.enableXsrfProtection false`,
+  );
 
   streamlitProcess = spawn(
     pythonExecutable,
@@ -379,17 +400,17 @@ app.on("ready", () => {
       "--server.enableXsrfProtection",
       "false",
     ],
-    { env },
+    {
+      env,
+      shell: process.platform === "win32",
+    },
   );
 
   streamlitProcess.stdout.on("data", (data) => {
     const output = data.toString();
     console.log(`[Streamlit stdout]: ${output}`);
-
     if (output.includes("You can now view your Streamlit app")) {
-      if (!mainWindow) {
-        createWindow();
-      }
+      if (!mainWindow) createWindow();
     }
   });
 
@@ -414,15 +435,11 @@ app.on("ready", () => {
         `Streamlit process exited unexpectedly with code ${code}.\nThe application will now close.`,
       );
     }
-    if (mainWindow) {
-      mainWindow.close();
-    }
+    if (mainWindow) mainWindow.close();
     app.quit();
   });
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  if (process.platform !== "darwin") app.quit();
 });
